@@ -1,0 +1,6 @@
+*.pyc
+models/
+resimg/
+logdata/
+.ipynb_checkpoints/
+.~lock.exp_notes.xlsx#
