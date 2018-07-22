@@ -139,13 +139,14 @@ def to_normal_strokes(big_stroke):
     l = 0
     for i in range(len(big_stroke)):
         if big_stroke[i, 4] > 0:
-            l = i
+            l = i+1
             break
     if l == 0:
         l = len(big_stroke)
     result = np.zeros((l, 3))
     result[:, 0:2] = big_stroke[0:l, 0:2]
     result[:, 2] = big_stroke[0:l, 3]
+    result[l-1,2] = 1 # last stroke
     return result
 
 
@@ -172,17 +173,17 @@ def clean_strokes(sample_strokes, factor=100):
     return copy_stroke
 
 
-def to_big_strokes(stroke, max_len=250):
-    """Converts from stroke-3 to stroke-5 format and pads to given length."""
+def to_big_strokes(stroke):
+    """Converts from stroke-3 to stroke-5 format 
+       No padding!."""
     # (But does not insert special start token).
 
-    result = np.zeros((max_len, 5), dtype=float)
     l = len(stroke)
-    assert l <= max_len
+    result = np.zeros((l, 5), dtype=float)
     result[0:l, 0:2] = stroke[:, 0:2]
     result[0:l, 3] = stroke[:, 2]
     result[0:l, 2] = 1 - result[0:l, 3]
-    result[l:, 4] = 1
+    result[l-1:, 2:5] = [0,0,1]
     return result
 
 def output_to_strokes(strokes): 

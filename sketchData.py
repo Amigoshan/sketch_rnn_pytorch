@@ -1,7 +1,7 @@
 import numpy as np
 from os.path import isfile, join, isdir
 from torch.utils.data import Dataset, DataLoader
-from utils import augment_strokes
+from utils import augment_strokes, to_big_strokes
 
 class SketchDataset(Dataset):
     """Class for loading data."""
@@ -37,7 +37,9 @@ class SketchDataset(Dataset):
         self.batch_idx = []
 
     def preprocess(self, strokes):
-        """Remove entries from strokes having > max_seq_length points."""
+        """Remove entries from strokes having > max_seq_length points.
+           self.strokes stores big-strokes
+        """
         raw_data = []
         seq_len = []
         count_data = 0
@@ -51,7 +53,8 @@ class SketchDataset(Dataset):
                 data = np.maximum(data, -self.limit)
                 data = np.array(data, dtype=np.float32)
                 data[:, 0:2] /= self.scale_factor
-                raw_data.append(data)
+                data_big = to_big_strokes(data)
+                raw_data.append(data_big)
                 seq_len.append(len(data))
         seq_len = np.array(seq_len)  # nstrokes for each sketch
         idx = np.argsort(seq_len)
@@ -118,8 +121,8 @@ class SketchDataset(Dataset):
             i = indices[idx]
             data = self.random_scale(self.strokes[i])
             data_copy = np.copy(data)
-            if self.augment_stroke_prob > 0:
-                data_copy = augment_strokes(data_copy, self.augment_stroke_prob)
+            # if self.augment_stroke_prob > 0: # TODO: compatible with big stroke
+            #     data_copy = augment_strokes(data_copy, self.augment_stroke_prob)
             x_batch.append(data_copy)
             length = len(data_copy)
             seq_len.append(length)
@@ -136,13 +139,9 @@ class SketchDataset(Dataset):
         self.batch_ind -= 1
         return self._get_batch_from_indices(self.batch_idx[self.batch_ind,:])
 
-    # def get_batch(self, idx):
-    #     """Get the idx'th batch from the dataset."""
-    #     assert idx >= 0, "idx must be non negative"
-    #     assert idx < self.num_batches, "idx must be less than the number of batches"
-    #     start_idx = idx * self.batch_size
-    #     indices = range(start_idx, start_idx + self.batch_size)
-    #     return self._get_batch_from_indices(indices)
+    def get_batch(self, idx):
+        """Get the idx'th batch from the dataset."""
+        return self._get_batch_from_indices(idx)
 
     def pad_batch(self, batch):
         """Pad the batch to be stroke-5 bigger format
@@ -152,21 +151,24 @@ class SketchDataset(Dataset):
         result = np.zeros((max_len + 1, self.batch_size, 5), dtype=np.float32)
         assert len(batch) == self.batch_size
 
-        strokeTypeTarget = []# np.zeros((self.batch_size, max_len), dtype=int) # used as classification target
+        strokeTypeTarget = np.ones((max_len,self.batch_size), dtype=int) * -1 # used as classification target
 
+        total_len = 0
         for i in range(self.batch_size):
             l = len(batch[i])
             assert l <= max_len
-            result[1:l+1, i, 0:2] = batch[i][:, 0:2]
-            result[1:l+1, i, 3] = batch[i][:, 2]
-            result[1:l+1, i, 2] = 1 - result[1:l+1, i, 3]
-            result[l+1:, i, 4] = 1
             # put in the first token, as described in sketch-rnn methodology
             result[0, i, :] = self.start_stroke_token
-            strokeTypeTarget=np.concatenate((strokeTypeTarget, batch[i][:, 2]))
-            strokeTypeTarget[-1] = 2
+            result[1:l+1, i, :] = batch[i]
+            total_len += l
 
-        return result, strokeTypeTarget.astype(int)
+            strokeTypeTarget[0:l, i] = batch[i][:, 3]
+            strokeTypeTarget[l-1, i] = 2
+
+        strokeTypeTarget = strokeTypeTarget.reshape(-1)
+        strokeTypeTarget = strokeTypeTarget[strokeTypeTarget>=0]
+
+        return result, strokeTypeTarget
 
 if __name__=='__main__':
     from utils import drawFig, strokes_to_lines, to_normal_strokes

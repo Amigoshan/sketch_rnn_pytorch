@@ -7,18 +7,21 @@ import time
 
 from sketchRNN import SketchRnn 
 from sketchData import SketchDataset
+from utils import to_normal_strokes, output_to_strokes, drawFig
 
 exp_prefix = '1_3_'
 
 Lr = 0.0001
-Batch = 64
-Trainstep = 100000
+Batch = 100
+Trainstep = 200000
 Showiter = 10
 Snapshot = 10000
+Visiter = 2000
 
 InputNum = 5
 HiddenNum = 512
 OutputNum = 5
+ClipNorm = 10.0
 
 exp_name = exp_prefix+'sketchrnn'
 paramName = 'models/'+ exp_name
@@ -37,8 +40,8 @@ dataset.normalize()
 sketchnet = SketchRnn(InputNum, HiddenNum, OutputNum)
 sketchnet.cuda()
 
-criterion_mse = nn.MSELoss(size_average=True)
-criterion_ce = nn.CrossEntropyLoss(weight=torch.Tensor([0.01,0.1,1]).cuda(), size_average=True)
+criterion_mse = nn.MSELoss(size_average=False)
+criterion_ce = nn.CrossEntropyLoss(weight=torch.Tensor([1,10,100]).cuda(), size_average=False)
 optimizer = optim.Adam(sketchnet.parameters(), lr = Lr) #,weight_decay=1e-5)
 
 count = 0
@@ -55,6 +58,7 @@ while True:
     count += 1
 
     (sample, targetStroke), seq_len = dataset.random_batch()
+    # (sample, targetStroke), seq_len = dataset.get_batch(range(Batch))
     inputVar = torch.from_numpy(sample)
     mean, logstd, outputVar = sketchnet(inputVar.cuda(), seq_len.tolist())
 
@@ -69,8 +73,13 @@ while True:
     # loss_kl = ((std*std+mean*mean)/2 - std.log() - 0.5).sum()
     loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).sum()/2.0
     # loss_kl = (std.log()+(1+mean*mean)/(2*std*std) - 0.5).mean()
-    loss =  loss_stroke #+ loss_kl  # loss_cons + 
+    loss =  loss_cons + loss_stroke + loss_kl  # 
     loss.backward()
+
+    # torch.nn.utils.clip_grad_norm(sketchnet.parameters(), ClipNorm)
+    for param in sketchnet.parameters():
+        param.grad.clamp_(-ClipNorm, ClipNorm) 
+
     optimizer.step()
 
     running_loss_cons += loss_cons.item()
@@ -86,6 +95,36 @@ while True:
         running_loss_cons = 0.0
         running_loss_stroke = 0.0
         running_loss_kl = 0.0
+
+        # print '  ',
+        # for param in sketchnet.parameters():
+        #     print '%.1f %.1f' % (torch.mean(param.grad).item(), torch.std(param.grad).item()),
+        # print ''
+
+    # if count % Visiter == 0:
+    #     # import ipdb; ipdb.set_trace()
+    #     # viualize the input output
+    #     small_stroke = to_normal_strokes(sample[:,0,:])
+    #     sample_denorm = dataset.denormalize(small_stroke)
+    #     drawFig(sample_denorm)
+
+    #     outStroke = output_to_strokes(outputVar.detach().cpu().numpy())
+    #     outStroke = outStroke.reshape((seq_len[0], Batch, OutputNum)) # TODO: can not handle batch with various seq length
+    #     small_stroke = to_normal_strokes(outStroke[:,0,:])
+    #     sample_denorm = dataset.denormalize(small_stroke)
+    #     small_stroke[-1,-1] = 1
+    #     drawFig(sample_denorm)
+
+    #     # viualize the input output
+    #     small_stroke = to_normal_strokes(sample[:,10,:])
+    #     sample_denorm = dataset.denormalize(small_stroke)
+    #     drawFig(sample_denorm)
+
+    #     small_stroke = to_normal_strokes(outStroke[:,10,:])
+    #     sample_denorm = dataset.denormalize(small_stroke)
+    #     small_stroke[-1,-1] = 1
+    #     drawFig(sample_denorm)
+
     lossplot.append(loss.item())
     lossplot_kl.append(loss_kl.item())
     lossplot_cons.append(loss_cons.item())
@@ -97,6 +136,7 @@ while True:
         np.save(join(datadir,exp_prefix+'lossconsplot.npy'), lossplot_cons)
         np.save(join(datadir,exp_prefix+'lossstrokeplot.npy'), lossplot_stroke)
         np.save(join(datadir,exp_prefix+'lossplot.npy'), lossplot)
+
 
     if count>=Trainstep:
         break

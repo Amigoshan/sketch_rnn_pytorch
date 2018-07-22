@@ -12,7 +12,7 @@ from utils import loadPretrain, drawFig, to_normal_strokes, output_to_strokes
 exp_prefix = '1_1_'
 
 Lr = 0.0001
-Batch = 64
+Batch = 1
 Trainstep = 50000
 Showiter = 1
 Snapshot = 10000
@@ -23,7 +23,7 @@ OutputNum = 5
 
 exp_name = exp_prefix+'sketchrnn'
 paramName = 'models/'+ exp_name
-modelname = 'models/1_2_sketchrnn_100000.pkl'
+modelname = 'models/1_3_sketchrnn_100000.pkl'
 LoadPretrain = True
 
 datapath = '/home/wenshan/datasets/quickdraw'
@@ -58,7 +58,7 @@ while True:
 
     (sample, targetStroke), seq_len = dataset.random_batch()
     inputVar = torch.from_numpy(sample)
-    mean, logstd, outputVar = sketchnet(inputVar.cuda(), seq_len.tolist()) #, testing=True, use_gt=True)
+    mean, logstd, outputVar = sketchnet(inputVar.cuda(), seq_len.tolist(), testing=True)#, use_gt=True)
 
     # import ipdb; ipdb.set_trace()
 
