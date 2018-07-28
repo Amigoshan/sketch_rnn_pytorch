@@ -23,10 +23,10 @@ OutputNum = 5
 
 exp_name = exp_prefix+'sketchrnn'
 paramName = 'models/'+ exp_name
-modelname = 'models/1_3_sketchrnn_100000.pkl'
+modelname = 'models/1_9_sketchrnn_130000.pkl'
 LoadPretrain = True
 
-datapath = '/home/wenshan/datasets/quickdraw'
+datapath = '/home/wenshan/Downloads'
 filecat = 'sketchrnn_cat.npz'
 imgoutdir = 'resimg'
 datadir = 'logdata'
@@ -37,7 +37,7 @@ with np.load(join(datapath, filecat)) as cat_data:
 dataset = SketchDataset(train_cat, batch_size=Batch)
 dataset.normalize()
 
-sketchnet = SketchRnn(InputNum, HiddenNum, OutputNum)
+sketchnet = SketchRnn(InputNum, HiddenNum, OutputNum, bidir = True)
 if LoadPretrain:
     sketchnet = loadPretrain(sketchnet, modelname)
 sketchnet.cuda()

@@ -7,26 +7,31 @@ import time
 
 from sketchRNN import SketchRnn 
 from sketchData import SketchDataset
-from utils import to_normal_strokes, output_to_strokes, drawFig
+from utils import to_normal_strokes, output_to_strokes, drawFig, loadPretrain
 
-exp_prefix = '1_3_'
+import visdom
 
-Lr = 0.0001
+exp_prefix = '1_9_'
+
+Lr = 0.001
 Batch = 100
-Trainstep = 200000
+Trainstep = 170000
 Showiter = 10
 Snapshot = 10000
 Visiter = 2000
+Bidirection = True
 
 InputNum = 5
 HiddenNum = 512
 OutputNum = 5
-ClipNorm = 10.0
+ClipNorm = 0.5
+LoadPretrain = False
+modelname = 'models/1_6_sketchrnn_100000.pkl'
 
 exp_name = exp_prefix+'sketchrnn'
 paramName = 'models/'+ exp_name
 
-datapath = '/home/wenshan/datasets/quickdraw'
+datapath = '/home/wenshan/Downloads'
 filecat = 'sketchrnn_cat.npz'
 imgoutdir = 'resimg'
 datadir = 'logdata'
@@ -37,12 +42,25 @@ with np.load(join(datapath, filecat)) as cat_data:
 dataset = SketchDataset(train_cat, batch_size=Batch)
 dataset.normalize()
 
-sketchnet = SketchRnn(InputNum, HiddenNum, OutputNum)
+sketchnet = SketchRnn(InputNum, HiddenNum, OutputNum, bidir = True)
+if LoadPretrain:
+    sketchnet = loadPretrain(sketchnet, modelname)
 sketchnet.cuda()
 
-criterion_mse = nn.MSELoss(size_average=False)
-criterion_ce = nn.CrossEntropyLoss(weight=torch.Tensor([1,10,100]).cuda(), size_average=False)
+criterion_mse = nn.MSELoss(size_average=True)
+criterion_ce = nn.CrossEntropyLoss(weight=torch.Tensor([1,10,100]).cuda(), size_average=Bidirection)
 optimizer = optim.Adam(sketchnet.parameters(), lr = Lr) #,weight_decay=1e-5)
+
+#initialize visualization
+vis = visdom.Visdom(env=exp_name, server='http://localhost', port=8097)
+loss_win = vis.line(X=np.array([-1]), Y=np.array([0]),
+                         opts=dict(xlabel='steps', ylabel='loss', title=exp_prefix[0:-1]+'loss'))
+loss_cons_win = vis.line(X=np.array([-1]), Y=np.array([0]),
+                        opts=dict(xlabel='steps', ylabel='loss', title=exp_prefix[0:-1]+'cons loss'))
+loss_stroke_win = vis.line(X=np.array([-1]), Y=np.array([0]),
+                        opts=dict(xlabel='steps', ylabel='loss', title=exp_prefix[0:-1]+'stroke loss'))
+loss_kl_win = vis.line(X=np.array([-1]), Y=np.array([0]),
+                        opts=dict(xlabel='steps', ylabel='loss', title=exp_prefix[0:-1]+'kl loss'))
 
 count = 0
 lossplot_cons = []
@@ -71,7 +89,7 @@ while True:
     loss_cons = criterion_mse(outputVar[:,0:2], targetVar[:,0:2].cuda())   
     loss_stroke = criterion_ce(outputVar[:,2:5], torch.LongTensor(targetStroke).cuda())  
     # loss_kl = ((std*std+mean*mean)/2 - std.log() - 0.5).sum()
-    loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).sum()/2.0
+    loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).mean()/2.0
     # loss_kl = (std.log()+(1+mean*mean)/(2*std*std) - 0.5).mean()
     loss =  loss_cons + loss_stroke + loss_kl  # 
     loss.backward()
@@ -98,7 +116,7 @@ while True:
 
         # print '  ',
         # for param in sketchnet.parameters():
-        #     print '%.1f %.1f' % (torch.mean(param.grad).item(), torch.std(param.grad).item()),
+        #     print '%.3f %.3f' % (torch.mean(param.grad).item(), torch.std(param.grad).item()),
         # print ''
 
     # if count % Visiter == 0:
@@ -130,6 +148,11 @@ while True:
     lossplot_cons.append(loss_cons.item())
     lossplot_stroke.append(loss_stroke.item())
 
+    vis.line(X=np.array([count]), Y=np.array([loss.item()]), win=loss_win, update='append')
+    vis.line(X=np.array([count]), Y=np.array([loss_cons.item()]), win=loss_cons_win, update='append')
+    vis.line(X=np.array([count]), Y=np.array([loss_stroke.item()]), win=loss_stroke_win, update='append')
+    vis.line(X=np.array([count]), Y=np.array([loss_kl.item()]), win=loss_kl_win, update='append')
+
     if (count)%Snapshot==0:
         torch.save(sketchnet.state_dict(), paramName+'_'+str(count)+'.pkl')
         np.save(join(datadir,exp_prefix+'lossklplot.npy'), lossplot_kl)
@@ -140,6 +163,12 @@ while True:
 
     if count>=Trainstep:
         break
+
+    # update Learning Rate
+    if count==100000 or count==150000:
+        Lr = Lr*0.2
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = Lr
 
 import matplotlib.pyplot as plt
 group = 10
