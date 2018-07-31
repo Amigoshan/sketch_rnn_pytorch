@@ -1,42 +1,48 @@
 import numpy as np
 from os.path import isfile, join, isdir
 from torch.utils.data import Dataset, DataLoader
-from utils import augment_strokes, to_big_strokes
+from utils import augment_strokes, to_big_strokes, strokes_to_lines
 
 class SketchDataset(Dataset):
-    """Class for loading data."""
+    """Class for loading data.
+    Returns (strokes, lineSeq, lineNum)
+    strokes(lines) in one sketch, 20 x 30 x 2
+    each line is padded to allow using dataload
+    lineSeq is also padded 
+    """
 
     def __init__(self,
                  strokes,
-                 max_seq_length=250,
+                 max_line_number=20, # statistic: 
+                 max_line_length=30,
                  scale_factor=1.0,
                  random_scale_factor=0.0,
                  augment_stroke_prob=0.0,
-                 batch_size=32,
                  limit=1000):
-        self.max_seq_length = max_seq_length  # N_max in sketch-rnn paper
+        self.strokes = strokes
+        self.max_line_number = max_line_number  # max number of strokes allowed in one sketch
+        self.max_line_length = max_line_length 
         self.scale_factor = scale_factor  # divide offsets by this factor
         self.random_scale_factor = random_scale_factor  # data augmentation method
         # Removes large gaps in the data. x and y offsets are clamped to have
         # absolute value no greater than this limit.
         self.limit = limit
         self.augment_stroke_prob = augment_stroke_prob  # data augmentation method
-        self.start_stroke_token = [0, 0, 1, 0, 0]  # S_0 in sketch-rnn paper
-        # sets self.strokes (list of ndarrays, one per sketch, in stroke-3 format,
-        # sorted by size)
-        self.strokes = []
-        self.strokeLen = []
-        self.preprocess(strokes)
 
-        self.N = len(self.strokes)
+        self.normalize()
 
-        # randomize the batch
-        self.batch_size = batch_size
-        self.batch_num = int(self.N)/int(batch_size)
-        self.batch_ind = 0
-        self.batch_idx = []
+        self.sketches = [] # all sketches in stroke-3 format
+        # self.sketchLen = [] # list of sketch length
+        self.sketchLineNum = [] # list of line number
+        self.sketchLineLength = [] # strokeNum x max_line_number
+        # strokeNum x max_line_number x max_line_length x 2
+        self.strokePaddedLines = [] # all sketches in padded-line format
+        self.preprocess(self.strokes)
 
-    def preprocess(self, strokes):
+        self.N = len(self.sketches)
+
+
+    def preprocess(self, sketches):
         """Remove entries from strokes having > max_seq_length points.
            self.strokes stores big-strokes
         """
@@ -46,33 +52,41 @@ class SketchDataset(Dataset):
 
         for i in range(len(strokes)):
             data = strokes[i]
-            if len(data) <= (self.max_seq_length):
-                count_data += 1
-                # removes large gaps from the data
-                data = np.minimum(data, self.limit)
-                data = np.maximum(data, -self.limit)
-                data = np.array(data, dtype=np.float32)
-                data[:, 0:2] /= self.scale_factor
-                data_big = to_big_strokes(data)
-                raw_data.append(data_big)
-                seq_len.append(len(data))
-        seq_len = np.array(seq_len)  # nstrokes for each sketch
-        idx = np.argsort(seq_len)
-        for i in range(len(seq_len)):
-            self.strokes.append(raw_data[idx[i]])
-            self.strokeLen.append(seq_len[idx[i]])
-        print("total images <= max_seq_len is %d" % count_data)
+            lines = strokes_to_lines(data)
+            linenum = len(lines)
+            if linenum > self.max_line_number: # too many strokes in the sketch
+                continue
+            lineLenList = np.zeros(self.max_line_number)
+            for line_ind, line in enumerate(lines):
+                lineLenList[line_ind] = len(line)
+
+            if np.max(lineLenList) > self.max_line_length: # too many points in one stroke
+                continue
+
+            self.sketchLineLength.append(lineLenList)
+            self.sketches.append(data)
+            self.sketchLineNum.append(linenum)
+
+            padded_lines = pad_lines(lines, self.max_line_number, self.max_line_lengthx)
+            self.strokePaddedLines.append(pad_lines)
+            count_data += 1
+
+        print("total images is %d" % count_data)
 
     def __len__(self):
         return self.N
 
     def __getitem__(self, idx):
-        return self.strokes[idx]
+        return self.strokePaddedLines[idx],self.sketchLineLength[idx], self.sketchLineNum[idx]
 
-    def random_sample(self):
-        """Return a random sample, in stroke-3 format as used by draw_strokes."""
-        sample = np.copy(random.choice(self.strokes))
-        return sample
+    def pad_lines(lines, maxLineNum, maxLineLen):
+        """
+        return maxLineNum x maxLineLen x 2 numpy array
+        """
+        padded_array = np.zeros((maxLineNum, maxLineLen, 2))
+        for lineInd,line in enumerate(lines):
+            padded_array[lineInd,:len(line),:] = line
+        return padded_array
 
     def random_scale(self, data):
         """Augment data by stretching x and y axis randomly [1-e, 1+e]."""
@@ -89,8 +103,8 @@ class SketchDataset(Dataset):
         """Calculate the normalizing factor explained in appendix of sketch-rnn."""
         data = []
         for i in range(len(self.strokes)):
-            if len(self.strokes[i]) > self.max_seq_length:
-                continue
+            # if len(self.strokes[i]) > self.max_seq_length:
+            #     continue
             for j in range(len(self.strokes[i])):
                 data.append(self.strokes[i][j, 0])
                 data.append(self.strokes[i][j, 1])
@@ -110,66 +124,6 @@ class SketchDataset(Dataset):
         stroke[:, 0:2] *= self.scale_factor
         return stroke
 
-    def _get_batch_from_indices(self, indices):
-        """Given a list of indices, return the potentially augmented batch.
-           Returned strokes are sorted by length"""
-        x_batch = []
-        seq_len = []
-        # sort the indices to make sure the data in accending sequence
-        indices[::-1].sort() # = np.sort(indices, descending=True)
-        for idx in range(len(indices)):
-            i = indices[idx]
-            data = self.random_scale(self.strokes[i])
-            data_copy = np.copy(data)
-            # if self.augment_stroke_prob > 0: # TODO: compatible with big stroke
-            #     data_copy = augment_strokes(data_copy, self.augment_stroke_prob)
-            x_batch.append(data_copy)
-            length = len(data_copy)
-            seq_len.append(length)
-        seq_len = np.array(seq_len, dtype=int)
-        # We return three things: stroke-3 format, stroke-5 format, list of seq_len.
-        return self.pad_batch(x_batch), seq_len
-
-    def random_batch(self):
-        """Return a randomised portion of the training data."""
-        if self.batch_ind <= 0: # resort the strokes every epoch
-            idx = np.random.permutation(range(0, self.N))
-            self.batch_idx = idx[0 : self.batch_num * self.batch_size].reshape(self.batch_num, self.batch_size)
-            self.batch_ind = self.batch_num 
-        self.batch_ind -= 1
-        return self._get_batch_from_indices(self.batch_idx[self.batch_ind,:])
-
-    def get_batch(self, idx):
-        """Get the idx'th batch from the dataset."""
-        return self._get_batch_from_indices(idx)
-
-    def pad_batch(self, batch):
-        """Pad the batch to be stroke-5 bigger format
-           strokes in batch should in descending order by length, required by pack
-           """
-        max_len = len(batch[0])
-        result = np.zeros((max_len + 1, self.batch_size, 5), dtype=np.float32)
-        assert len(batch) == self.batch_size
-
-        strokeTypeTarget = np.ones((max_len,self.batch_size), dtype=int) * -1 # used as classification target
-
-        total_len = 0
-        for i in range(self.batch_size):
-            l = len(batch[i])
-            assert l <= max_len
-            # put in the first token, as described in sketch-rnn methodology
-            result[0, i, :] = self.start_stroke_token
-            result[1:l+1, i, :] = batch[i]
-            total_len += l
-
-            strokeTypeTarget[0:l, i] = batch[i][:, 3]
-            strokeTypeTarget[l-1, i] = 2
-
-        strokeTypeTarget = strokeTypeTarget.reshape(-1)
-        strokeTypeTarget = strokeTypeTarget[strokeTypeTarget>=0]
-
-        return result, strokeTypeTarget
-
 if __name__=='__main__':
     from utils import drawFig, strokes_to_lines, to_normal_strokes
     import matplotlib.pyplot as plt
@@ -182,9 +136,7 @@ if __name__=='__main__':
     with np.load(join(datapath, filecat)) as cat_data:
         train_cat, val_cat, test_cat = cat_data['train'], cat_data['valid'], cat_data['test']
 
-    dataset = SketchDataset(train_cat, batch_size=3)
-    dataset.normalize()
-
+    dataset = SketchDataset(train_cat)
     print len(dataset)
 
     # for k in range(100):
@@ -196,11 +148,11 @@ if __name__=='__main__':
     #     drawFig(sample_denorm)
 
     for k in range(100):
-        (sample, target), seq_len = dataset.random_batch()
-        print sample.shape, seq_len
-        small_stroke = to_normal_strokes(sample[:,0,:])
-        sample_denorm = dataset.denormalize(small_stroke)
-        drawFig(sample_denorm)
-        pack = nn.utils.rnn.pack_padded_sequence(torch.FloatTensor(sample), seq_len.tolist(), batch_first=False)
-        print pack
+        padded_lines, line_len, line_num = dataset[k]
+        # print sample.shape, seq_len
+        # small_stroke = to_normal_strokes(sample[:,0,:])
+        # sample_denorm = dataset.denormalize(small_stroke)
+        # drawFig(sample_denorm)
+        # pack = nn.utils.rnn.pack_padded_sequence(torch.FloatTensor(sample), seq_len.tolist(), batch_first=False)
+        # print pack
         import ipdb;ipdb.set_trace()
