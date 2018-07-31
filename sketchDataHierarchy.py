@@ -50,8 +50,8 @@ class SketchDataset(Dataset):
         seq_len = []
         count_data = 0
 
-        for i in range(len(strokes)):
-            data = strokes[i]
+        for i in range(len(self.strokes)):
+            data = self.strokes[i]
             lines = strokes_to_lines(data)
             linenum = len(lines)
             if linenum > self.max_line_number: # too many strokes in the sketch
@@ -67,8 +67,8 @@ class SketchDataset(Dataset):
             self.sketches.append(data)
             self.sketchLineNum.append(linenum)
 
-            padded_lines = pad_lines(lines, self.max_line_number, self.max_line_lengthx)
-            self.strokePaddedLines.append(pad_lines)
+            padded_lines = self.pad_lines(lines, self.max_line_number, self.max_line_length)
+            self.strokePaddedLines.append(padded_lines)
             count_data += 1
 
         print("total images is %d" % count_data)
@@ -79,7 +79,7 @@ class SketchDataset(Dataset):
     def __getitem__(self, idx):
         return self.strokePaddedLines[idx],self.sketchLineLength[idx], self.sketchLineNum[idx]
 
-    def pad_lines(lines, maxLineNum, maxLineLen):
+    def pad_lines(self, lines, maxLineNum, maxLineLen):
         """
         return maxLineNum x maxLineLen x 2 numpy array
         """
@@ -117,6 +117,7 @@ class SketchDataset(Dataset):
             scale_factor = self.calculate_normalizing_scale_factor()
         self.scale_factor = scale_factor
         for i in range(len(self.strokes)):
+            self.strokes[i] = np.array(self.strokes[i], dtype=np.float32)
             self.strokes[i][:, 0:2] /= self.scale_factor
 
     def denormalize(self, stroke):
@@ -129,7 +130,7 @@ if __name__=='__main__':
     import matplotlib.pyplot as plt
     import torch.nn as nn
     import torch
-    datapath = '/home/wenshan/datasets/quickdraw'
+    datapath = './data'
 
     filecat = 'sketchrnn_cat.npz'
 
