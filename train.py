@@ -31,7 +31,7 @@ modelname = 'models/1_6_sketchrnn_100000.pkl'
 exp_name = exp_prefix+'sketchrnn'
 paramName = 'models/'+ exp_name
 
-datapath = '/home/wenshan/Downloads'
+datapath = 'data'
 filecat = 'sketchrnn_cat.npz'
 imgoutdir = 'resimg'
 datadir = 'logdata'

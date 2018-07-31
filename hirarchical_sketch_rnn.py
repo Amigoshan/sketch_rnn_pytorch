@@ -2,18 +2,80 @@ import torch
 import torch.nn as nn
 from utils import output_to_strokes
 
+class StokeRnn(nn.Module): 
+    '''
+    Input: (delta_x, delta_y)
+    Encode: VAE
+    Decode: (delta_x, delta_y), (0, 0) means end of the stroke
+    '''
+    def __init__(self, inputNum, hiddenNum):
+        super(StokeRnn, self).__init__()
+        self.hiddenNum = hiddenNum
+        self.inputNum = inputNum
+        self.encoder = nn.LSTM(inputNum, hiddenNum)
+        self.logstd = nn.Linear(hiddenNum, hiddenNum)
+        self.mean = nn.Linear(hiddenNum, hiddenNum)
+
+        self.decoderH = nn.Linear(hiddenNum, hiddenNum)
+        self.decoderC = nn.Linear(hiddenNum, hiddenNum)
+        self.decoder = nn.LSTM(inputNum+hiddenNum, hiddenNum) # the input is combined with the coding
+        self.output = nn.Linear(hiddenNum, outputNum)
+
+    def forward(self, x, seq_len):
+        (seqNum, batchNum, inputNum) = x.size()  
+        code = self.encode(x, seq_len, batchNum)
+        outputVar = self.decode(code, batchNum, seqNum)
+
+        return outputVar
+
+
+    def encode(self, x, seq_len, batchNum):
+        x_pack = nn.utils.rnn.pack_padded_sequence(x, seq_len, batch_first=False)
+        _, (hn, _) = self.encoder(x_pack, self.init_hidden(batchNum))
+        meanVar = self.mean(hn.view(batchNum, -1)) # batch x hidden
+        logstdVar = self.logstd(hn.view(batchNum, -1)) # batch x hidden
+
+        # sample from the mean and logstd
+        epsilon = torch.normal(mean=torch.zeros_like(meanVar))
+        sample = meanVar + (logstdVar/2).exp() * epsilon # batch x hidden
+
+        return sample
+
+    def decode(self, code, batchNum, seqNum):
+        '''
+        seqNum: longest sequence length in one batch
+        '''
+        hn = torch.tanh(self.decoderH(code)).view(1,batchNum,-1) 
+        cn = torch.tanh(self.decoderC(code)).view(1,batchNum,-1) 
+
+        outlist = []
+        decoderInput = torch.zeros((1, batchNum, self.inputNum)).cuda()
+        decoderInput = torch.cat((decoderInput, code.view((1, batchNum, self.hiddenNum))), dim=2) # 1 x batch x hidden
+        hidden = (hn, cn)
+        # if testing, input the data in sequence one by one
+        for k in range(seqNum):
+            outputVar, hidden = self.decoder(decoderInput, hidden)
+            outputVar = self.output(outputVar.view(-1, self.hiddenNum))
+
+            outlist.append(outputVar)
+            decoderInput = torch.cat((outputVar.view((1, batchNum, 5)), code.view((1, batchNum, self.hiddenNum))), dim=2)
+
+        outputVar = torch.cat(outlist, dim=0) # (seq x batch) x ouput
+
+        return outputVar
+
+    def init_hidden(self, batchNum):
+        return torch.zeros(1, batchNum, self.hiddenNum).cuda(), \
+                torch.zeros(1, batchNum, self.hiddenNum).cuda()
+
+
 class SketchRnn(nn.Module):
-    def __init__(self, inputNum, hiddenNum, outputNum, bidir = False):
+    def __init__(self, inputNum, hiddenNum, outputNum):
         super(SketchRnn, self).__init__()
         self.hiddenNum = hiddenNum
-        self.bidir = bidir
-        if bidir:
-            self.bidirScale = 2
-        else:
-            self.bidirScale = 1
-        self.encoder = nn.LSTM(inputNum, hiddenNum, bidirectional=bidir)
-        self.mean = nn.Linear(self.bidirScale*hiddenNum, hiddenNum)
-        self.logstd = nn.Linear(self.bidirScale*hiddenNum, hiddenNum)
+        self.encoder = nn.LSTM(inputNum, hiddenNum)
+        self.mean = nn.Linear(hiddenNum, hiddenNum)
+        self.logstd = nn.Linear(hiddenNum, hiddenNum)
         self.decoderH = nn.Linear(hiddenNum, hiddenNum)
         self.decoderC = nn.Linear(hiddenNum, hiddenNum)
         self.decoder = nn.LSTM(inputNum+hiddenNum, hiddenNum) # the input is combined with the coding
@@ -100,4 +162,4 @@ if __name__ == '__main__':
     inputVar = torch.randn(seqNum, 10, inputNum)
 
     
-    # import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace() 

@@ -2,5 +2,6 @@
 models/
 resimg/
 logdata/
+data/
 .ipynb_checkpoints/
 .~lock.exp_notes.xlsx#
