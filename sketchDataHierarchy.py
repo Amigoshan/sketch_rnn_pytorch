@@ -1,9 +1,8 @@
 import numpy as np
 from os.path import isfile, join, isdir
-from torch.utils.data import Dataset, DataLoader
-from utils import augment_strokes, to_big_strokes, strokes_to_lines
+from torch.utils.data import Dataset
 
-class SketchDataset(Dataset):
+class SketchDatasetHierarchy(Dataset):
     """Class for loading data.
     Returns (strokes, lineSeq, lineNum)
     strokes(lines) in one sketch, 20 x 30 x 2
@@ -19,6 +18,19 @@ class SketchDataset(Dataset):
                  random_scale_factor=0.0,
                  augment_stroke_prob=0.0,
                  limit=1000):
+
+        processed_file = 'data_processed.npz'
+        if isfile(processed_file): # load preprocessed file to save time
+            outfile = open(processed_file, 'r')
+            processed_data = np.load(outfile)
+            self.sketchLineNum = processed_data['sketchLineNum']
+            self.sketchLineLength = processed_data['sketchLineLength']
+            self.strokePaddedLines = processed_data['strokePaddedLines']
+            self.scale_factor = float(processed_data['scale_factor'])
+            self.N = len(self.sketchLineNum)
+            outfile.close()
+            return 
+
         self.strokes = strokes
         self.max_line_number = max_line_number  # max number of strokes allowed in one sketch
         self.max_line_length = max_line_length 
@@ -39,20 +51,25 @@ class SketchDataset(Dataset):
         self.strokePaddedLines = [] # all sketches in padded-line format
         self.preprocess(self.strokes)
 
-        self.N = len(self.sketches)
+        self.N = len(self.sketchLineNum)
 
+        outfile = open(processed_file, 'w')
+        np.savez(outfile, 
+            sketchLineNum=self.sketchLineNum, 
+            sketchLineLength=self.sketchLineLength,
+            strokePaddedLines=self.strokePaddedLines,
+            scale_factor=self.scale_factor)
+        outfile.close()
 
     def preprocess(self, sketches):
         """Remove entries from strokes having > max_seq_length points.
-           self.strokes stores big-strokes
+           self.strokes storkes big-strokes
         """
-        raw_data = []
-        seq_len = []
         count_data = 0
 
         for i in range(len(self.strokes)):
             data = self.strokes[i]
-            lines = strokes_to_lines(data)
+            lines = self.strokes_to_lines(data)
             linenum = len(lines)
             if linenum > self.max_line_number: # too many strokes in the sketch
                 continue
@@ -71,6 +88,9 @@ class SketchDataset(Dataset):
             self.strokePaddedLines.append(padded_lines)
             count_data += 1
 
+        self.sketchLineLength = np.array(self.sketchLineLength)
+        self.sketchLineNum = np.array(self.sketchLineNum)
+        self.strokePaddedLines = np.array(self.strokePaddedLines)
         print("total images is %d" % count_data)
 
     def __len__(self):
@@ -78,6 +98,21 @@ class SketchDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.strokePaddedLines[idx],self.sketchLineLength[idx], self.sketchLineNum[idx]
+
+    def strokes_to_lines(self, strokes):
+        """
+        cut the strokes into lines without changing to global frame (still in delta_x, delta_y)
+        """
+        lines = []
+        line = []
+        for i in range(len(strokes)):
+            if strokes[i, 2] == 1:
+                line.append(strokes[i, 0:2])
+                lines.append(line)
+                line = []
+            else:
+                line.append(strokes[i, 0:2])
+        return lines
 
     def pad_lines(self, lines, maxLineNum, maxLineLen):
         """
@@ -87,6 +122,21 @@ class SketchDataset(Dataset):
         for lineInd,line in enumerate(lines):
             padded_array[lineInd,:len(line),:] = line
         return padded_array
+
+    def unpad_lines(self, padded_lines):
+        unpaded_array = []
+        for line in padded_lines:
+            lineLen = len(line)
+            for k in line[::-1]:
+                if k[0]==0 and k[1]==0:
+                    lineLen -= 1
+                else:
+                    break
+            if lineLen>0:
+                unpaded_array.append(line[:lineLen,:])
+            else:
+                break
+        return unpaded_array
 
     def random_scale(self, data):
         """Augment data by stretching x and y axis randomly [1-e, 1+e]."""
@@ -122,38 +172,61 @@ class SketchDataset(Dataset):
 
     def denormalize(self, stroke):
         """Denormalize one stroke usually for visualization"""
-        stroke[:, 0:2] *= self.scale_factor
+        stroke *= self.scale_factor
         return stroke
 
+
+    def paddedLineDrawFig(self, paddedLine, line_len, line_num):
+        paddedLine = self.denormalize(paddedLine)
+        lines = self.unpad_lines(paddedLine)
+        lines_draw = []
+        x, y = 0, 0
+        for line in lines:
+            line_draw = []
+            for i in range(len(line)):
+                x += float(line[i, 0])
+                y += float(line[i, 1])
+                line_draw.append([x, y])
+            lines_draw.append(np.array(line_draw))
+
+        for line in lines_draw:
+            line_np = np.array(line)
+        #     print cat0_np.shape, cat0_np, cat0_np[:,0], cat0_np[:,1]
+            plt.plot(line_np[:,0],0-line_np[:,1])
+        plt.show()
+
+
 if __name__=='__main__':
-    from utils import drawFig, strokes_to_lines, to_normal_strokes
     import matplotlib.pyplot as plt
     import torch.nn as nn
     import torch
-    datapath = './data'
+    from torch.utils.data import Dataset, DataLoader
+
+    datapath = '/home/wenshan/datasets/quickdraw'
 
     filecat = 'sketchrnn_cat.npz'
 
     with np.load(join(datapath, filecat)) as cat_data:
         train_cat, val_cat, test_cat = cat_data['train'], cat_data['valid'], cat_data['test']
 
-    dataset = SketchDataset(train_cat)
+    dataset = SketchDatasetHierarchy(train_cat)
     print len(dataset)
 
     # for k in range(100):
-    #     # import ipdb;ipdb.set_trace()
-    #     sample = dataset[k]
-    #     # print 'sample',sample
-    #     sample_denorm = dataset.denormalize(sample)
-    #     # print 'denorm', sample_denorm
-    #     drawFig(sample_denorm)
+    #     padded_lines, line_len, line_num = dataset[k]
+    #     dataset.paddedLineDrawFig(padded_lines,line_len, line_num)
+    
+    dataloader = DataLoader(dataset, batch_size=5, shuffle=True, num_workers=2)
+    dataiter = iter(dataloader)
 
-    for k in range(100):
-        padded_lines, line_len, line_num = dataset[k]
+    while True:
+        sample = dataiter.next()
+        dataset.paddedLineDrawFig(sample[0][0,:].numpy(),sample[1][0,:].numpy(), sample[2][0].numpy())
+        # import ipdb; ipdb.set_trace()
         # print sample.shape, seq_len
         # small_stroke = to_normal_strokes(sample[:,0,:])
         # sample_denorm = dataset.denormalize(small_stroke)
         # drawFig(sample_denorm)
         # pack = nn.utils.rnn.pack_padded_sequence(torch.FloatTensor(sample), seq_len.tolist(), batch_first=False)
         # print pack
-        import ipdb;ipdb.set_trace()
+        # import ipdb;ipdb.set_trace()

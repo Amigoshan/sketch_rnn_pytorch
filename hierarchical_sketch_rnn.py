@@ -2,14 +2,14 @@ import torch
 import torch.nn as nn
 from utils import output_to_strokes
 
-class StokeRnn(nn.Module): 
+class StrokeRnn(nn.Module): 
     '''
     Input: (delta_x, delta_y)
     Encode: VAE
     Decode: (delta_x, delta_y), (0, 0) means end of the stroke
     '''
-    def __init__(self, inputNum, hiddenNum):
-        super(StokeRnn, self).__init__()
+    def __init__(self, inputNum, hiddenNum, outputNum):
+        super(StrokeRnn, self).__init__()
         self.hiddenNum = hiddenNum
         self.inputNum = inputNum
         self.encoder = nn.LSTM(inputNum, hiddenNum)
@@ -23,13 +23,14 @@ class StokeRnn(nn.Module):
 
     def forward(self, x, seq_len):
         (seqNum, batchNum, inputNum) = x.size()  
-        code = self.encode(x, seq_len, batchNum)
+        code, meanVar, logstdVar = self.encode(x, seq_len, batchNum)
         outputVar = self.decode(code, batchNum, seqNum)
 
-        return outputVar
+        return outputVar, meanVar, logstdVar
 
 
     def encode(self, x, seq_len, batchNum):
+        import ipdb;ipdb.set_trace()
         x_pack = nn.utils.rnn.pack_padded_sequence(x, seq_len, batch_first=False)
         _, (hn, _) = self.encoder(x_pack, self.init_hidden(batchNum))
         meanVar = self.mean(hn.view(batchNum, -1)) # batch x hidden
@@ -39,7 +40,7 @@ class StokeRnn(nn.Module):
         epsilon = torch.normal(mean=torch.zeros_like(meanVar))
         sample = meanVar + (logstdVar/2).exp() * epsilon # batch x hidden
 
-        return sample
+        return sample, meanVar, logstdVar
 
     def decode(self, code, batchNum, seqNum):
         '''
@@ -154,12 +155,13 @@ if __name__ == '__main__':
     hiddenNum = 128
     outputNum = 5
     seqNum = 10
-    rnn = SketchRnn(inputNum, hiddenNum, outputNum)
-    inputVar = torch.randn(seqNum+1, batchNum, inputNum)
-    mean, logstd, outputVar = rnn(inputVar, range(seqNum,seqNum-batchNum,-1), testing=True)
+    rnn = StrokeRnn(inputNum, hiddenNum, outputNum)
+    rnn.cuda()
+    inputVar = torch.randn(seqNum, batchNum, inputNum).cuda()
+    outputVar = rnn(inputVar, range(seqNum,seqNum-batchNum,-1))
 
     # testing multiple batch using pack_padded_sequence
-    inputVar = torch.randn(seqNum, 10, inputNum)
+    # inputVar = torch.randn(seqNum, 10, inputNum)
 
     
-    # import ipdb; ipdb.set_trace() 
+    import ipdb; ipdb.set_trace() 
