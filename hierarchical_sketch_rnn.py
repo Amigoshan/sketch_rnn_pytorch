@@ -31,8 +31,12 @@ class StrokeRnn(nn.Module):
 
     def encode(self, x, seq_len, batchNum):
         import ipdb;ipdb.set_trace()
-        x_pack = nn.utils.rnn.pack_padded_sequence(x, seq_len, batch_first=False)
-        _, (hn, _) = self.encoder(x_pack, self.init_hidden(batchNum))
+        # x_pack = nn.utils.rnn.pack_padded_sequence(x, seq_len, batch_first=False)
+        # outputVar: 30 x linenum x hidden
+        outputVar, _ = self.encoder(x, self.init_hidden(batchNum))
+        hn = torch.zeros((0, outputVar.size()[-2], outputVar.size()[-1]))
+        for ind, slen in enumerate(seq_len):
+            hn = torch.cat(hn, outputVar[slen,ind,:])
         meanVar = self.mean(hn.view(batchNum, -1)) # batch x hidden
         logstdVar = self.logstd(hn.view(batchNum, -1)) # batch x hidden
 

@@ -41,8 +41,8 @@ with np.load(join(datapath, filecat)) as cat_data:
     train_cat, val_cat, test_cat = cat_data['train'], cat_data['valid'], cat_data['test']
 
 dataset = SketchDatasetHierarchy(train_cat)
-dataloader = DataLoader(dataset, batch_size=Batch, shuffle=True, num_workers=2)
-dataiter = iter(dataloader)
+# dataloader = DataLoader(dataset, batch_size=Batch, shuffle=True, num_workers=2)
+# dataiter = iter(dataloader)
 
 sketchnet = StrokeRnn(InputNum, HiddenNum, OutputNum)
 if LoadPretrain:
@@ -77,9 +77,12 @@ running_loss = 0.0
 while True:
     count += 1
     import ipdb; ipdb.set_trace()
-    strokePadded, sketchLineLength, sketchLineNum = dataiter.next()
-    inputVar = strokePadded[0, 0:sketchLineNum[0],:].cuda()
-    inputVar = torch.transpose(inputVar, 0, 1)
+    sketchLines, sketchLinelen, sketchLinenum, sketchLinelenFlat = dataset.get_random_batch(Batch)
+    # strokePadded, sketchLineLength, sketchLineNum = dataiter.next()
+
+
+    # inputVar = strokePadded[0, 0:sketchLineNum[0],:].cuda()
+    inputVar = torch.transpose(sketchLines, 0, 1)
     # for ind, linenum in enumerate(sketchLineNum):
 
     # (sample, targetStroke), seq_len = dataset.random_batch()
@@ -88,7 +91,8 @@ while True:
 
 
     # TODO: need sort before this ...
-    outputVar, mean, logstd= sketchnet(inputVar.cuda(), sketchLineLength[0, 0:sketchLineNum[0]].tolist())
+    # sketchLinelen = [item for sublist in sketchLinelen for item in sublist]
+    outputVar, mean, logstd= sketchnet(inputVar.cuda(), sketchLinelenFlat)
 
     # zero the parameter gradients
     optimizer.zero_grad()
