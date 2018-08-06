@@ -122,8 +122,9 @@ class SketchDatasetHierarchy(Dataset):
             self.batch_ind = self.batch_num 
         self.batch_ind -= 1
 
-        sketchLines = np.zeros((0,30,2)) 
-        sketchLinelenFlat = np.zeros((0, 1))
+        # import ipdb; ipdb.set_trace()
+        sketchLines = np.zeros((0,30,2), dtype=np.float32) 
+        sketchLinelenFlat = np.zeros((0), dtype=np.int)
         sketchLinelen, sketchLinenum = [], [] 
         for batchind in self.batch_idx[self.batch_ind,:]:
             sketchLines = np.concatenate((sketchLines,self.sketchPaddedLines[batchind]),axis=0 )
@@ -156,7 +157,7 @@ class SketchDatasetHierarchy(Dataset):
         padded_array = []
         # padded_array = np.zeros((maxLineNum, maxLineLen, 2))
         for line in lines:
-            padded_line = np.zeros((maxLineLen, 2))
+            padded_line = np.zeros((maxLineLen, 2), dtype=np.float32)
             padded_line[:len(line),:] = line
             padded_array.append(padded_line)
         return padded_array

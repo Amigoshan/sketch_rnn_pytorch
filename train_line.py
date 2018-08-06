@@ -32,7 +32,7 @@ LoadPretrain = False
 exp_name = exp_prefix+'sketchrnn'
 paramName = 'models/'+ exp_name
 
-datapath = '/home/wenshan/datasets/quickdraw'
+datapath = './data'
 filecat = 'sketchrnn_cat.npz'
 imgoutdir = 'resimg'
 datadir = 'logdata'
@@ -49,8 +49,8 @@ if LoadPretrain:
     sketchnet = loadPretrain(sketchnet, modelname)
 sketchnet.cuda()
 
-criterion_mse = nn.MSELoss(size_average=True)
-criterion_ce = nn.CrossEntropyLoss(weight=torch.Tensor([1,10,100]).cuda(), size_average=Bidirection)
+criterion_mse = nn.MSELoss()
+# criterion_ce = nn.CrossEntropyLoss(weight=torch.Tensor([1,10,100]).cuda(), size_average=Bidirection)
 optimizer = optim.Adam(sketchnet.parameters(), lr = Lr) #,weight_decay=1e-5)
 
 #initialize visualization
@@ -82,7 +82,7 @@ while True:
 
 
     # inputVar = strokePadded[0, 0:sketchLineNum[0],:].cuda()
-    inputVar = torch.transpose(sketchLines, 0, 1)
+    inputVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
     # for ind, linenum in enumerate(sketchLineNum):
 
     # (sample, targetStroke), seq_len = dataset.random_batch()
