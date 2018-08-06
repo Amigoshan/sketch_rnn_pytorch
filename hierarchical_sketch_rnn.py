@@ -65,11 +65,11 @@ class StrokeRnn(nn.Module):
             outputVar = self.output(outputVar.view(-1, self.hiddenNum))
 
             outlist.append(outputVar)
-            decoderInput = torch.cat((outputVar.view((1, batchNum, 5)), code.view((1, batchNum, self.hiddenNum))), dim=2)
+            decoderInput = torch.cat((outputVar.view((1, batchNum, -1)), code.view((1, batchNum, self.hiddenNum))), dim=2)
 
         outputVar = torch.cat(outlist, dim=0) # (seq x batch) x ouput
 
-        return outputVar
+        return outputVar.view(seqNum, batchNum, -1)
 
     def init_hidden(self, batchNum):
         return torch.zeros(1, batchNum, self.hiddenNum).cuda(), \

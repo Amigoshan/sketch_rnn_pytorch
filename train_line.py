@@ -15,8 +15,8 @@ import visdom
 exp_prefix = '2_1_'
 
 Lr = 0.001
-Batch = 1
-Trainstep = 170000
+Batch = 32
+Trainstep = 100000
 Showiter = 10
 Snapshot = 10000
 Visiter = 2000
@@ -25,7 +25,7 @@ Bidirection = True
 InputNum = 2
 HiddenNum = 512
 OutputNum = 2
-ClipNorm = 0.5
+ClipNorm = 0.1
 LoadPretrain = False
 # modelname = 'models/1_6_sketchrnn_100000.pkl'
 
@@ -76,35 +76,26 @@ running_loss = 0.0
 
 while True:
     count += 1
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()
     sketchLines, sketchLinelen, sketchLinenum, sketchLinelenFlat = dataset.get_random_batch(Batch)
     # strokePadded, sketchLineLength, sketchLineNum = dataiter.next()
 
 
     # inputVar = strokePadded[0, 0:sketchLineNum[0],:].cuda()
     inputVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
-    # for ind, linenum in enumerate(sketchLineNum):
 
-    # (sample, targetStroke), seq_len = dataset.random_batch()
-    # (sample, targetStroke), seq_len = dataset.get_batch(range(Batch))
-    # inputVar = torch.from_numpy(sample)
-
-
-    # TODO: need sort before this ...
     # sketchLinelen = [item for sublist in sketchLinelen for item in sublist]
     outputVar, mean, logstd= sketchnet(inputVar.cuda(), sketchLinelenFlat)
 
     # zero the parameter gradients
     optimizer.zero_grad()
-    targetVar = nn.utils.rnn.pack_padded_sequence(inputVar, sketchLineLength, batch_first=False) # first in sequence is S0 used by decoder
-    targetVar = targetVar.data
+    # TODO: there could be too much zero that bias the training
+    targetVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
 
     # import ipdb; ipdb.set_trace()
-    loss_cons = criterion_mse(outputVar[:,0:2], targetVar[:,0:2].cuda())   
-    # loss_stroke = criterion_ce(outputVar[:,2:5], torch.LongTensor(targetStroke).cuda())  
+    loss_cons = criterion_mse(outputVar, targetVar.cuda())   
     # loss_kl = ((std*std+mean*mean)/2 - std.log() - 0.5).sum()
     loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).mean()/2.0
-    # loss_kl = (std.log()+(1+mean*mean)/(2*std*std) - 0.5).mean()
     loss =  loss_cons + loss_kl  # 
     loss.backward()
 
@@ -128,35 +119,6 @@ while True:
         # running_loss_stroke = 0.0
         running_loss_kl = 0.0
 
-        # print '  ',
-        # for param in sketchnet.parameters():
-        #     print '%.3f %.3f' % (torch.mean(param.grad).item(), torch.std(param.grad).item()),
-        # print ''
-
-    # if count % Visiter == 0:
-    #     # import ipdb; ipdb.set_trace()
-    #     # viualize the input output
-    #     small_stroke = to_normal_strokes(sample[:,0,:])
-    #     sample_denorm = dataset.denormalize(small_stroke)
-    #     drawFig(sample_denorm)
-
-    #     outStroke = output_to_strokes(outputVar.detach().cpu().numpy())
-    #     outStroke = outStroke.reshape((seq_len[0], Batch, OutputNum)) # TODO: can not handle batch with various seq length
-    #     small_stroke = to_normal_strokes(outStroke[:,0,:])
-    #     sample_denorm = dataset.denormalize(small_stroke)
-    #     small_stroke[-1,-1] = 1
-    #     drawFig(sample_denorm)
-
-    #     # viualize the input output
-    #     small_stroke = to_normal_strokes(sample[:,10,:])
-    #     sample_denorm = dataset.denormalize(small_stroke)
-    #     drawFig(sample_denorm)
-
-    #     small_stroke = to_normal_strokes(outStroke[:,10,:])
-    #     sample_denorm = dataset.denormalize(small_stroke)
-    #     small_stroke[-1,-1] = 1
-    #     drawFig(sample_denorm)
-
     lossplot.append(loss.item())
     lossplot_kl.append(loss_kl.item())
     lossplot_cons.append(loss_cons.item())
@@ -178,11 +140,11 @@ while True:
     if count>=Trainstep:
         break
 
-    # update Learning Rate
-    if count==100000 or count==150000:
-        Lr = Lr*0.2
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = Lr
+    # # update Learning Rate
+    # if count==100000 or count==150000:
+    #     Lr = Lr*0.2
+    #     for param_group in optimizer.param_groups:
+    #         param_group['lr'] = Lr
 
 import matplotlib.pyplot as plt
 group = 10
