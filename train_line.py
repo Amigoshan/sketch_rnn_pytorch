@@ -4,19 +4,20 @@ import torch.optim as optim
 import numpy as np 
 from os.path import join
 import time
+from utils import loadPretrain
 
-from hierarchical_sketch_rnn import StrokeRnn 
+from hierarchical_sketch_rnn import StrokeRnn
 from sketchDataHierarchy import SketchDatasetHierarchy
 from torch.utils.data import Dataset, DataLoader
 # from utils import to_normal_strokes, output_to_strokes, drawFig, loadPretrain
 
 import visdom
 
-exp_prefix = '2_1_'
+exp_prefix = '2_2_'
 
 Lr = 0.001
 Batch = 32
-Trainstep = 100000
+Trainstep = 40000
 Showiter = 10
 Snapshot = 10000
 Visiter = 2000
@@ -27,7 +28,7 @@ HiddenNum = 512
 OutputNum = 2
 ClipNorm = 0.1
 LoadPretrain = False
-# modelname = 'models/1_6_sketchrnn_100000.pkl'
+modelname = 'models/2_1_sketchrnn_30000.pkl'
 
 exp_name = exp_prefix+'sketchrnn'
 paramName = 'models/'+ exp_name
@@ -36,6 +37,7 @@ datapath = './data'
 filecat = 'sketchrnn_cat.npz'
 imgoutdir = 'resimg'
 datadir = 'logdata'
+
 
 with np.load(join(datapath, filecat)) as cat_data:
     train_cat, val_cat, test_cat = cat_data['train'], cat_data['valid'], cat_data['test']
@@ -105,6 +107,15 @@ while True:
 
     optimizer.step()
 
+    # # visualize the trained lines:
+    # for k in range(inputVar.size(0)):
+    #     inputLine = inputVar[:,k,:].cpu().numpy()
+    #     print inputLine
+    #     dataset.drawPaddedLine(inputLine)
+    #     outputLine = outputVar[:,k,:].detach().cpu().numpy()
+    #     print outputLine
+    #     dataset.drawPaddedLine(outputLine)
+
     running_loss_cons += loss_cons.item()
     # running_loss_stroke += loss_stroke.item()
     running_loss_kl += loss_kl.item()
@@ -140,11 +151,11 @@ while True:
     if count>=Trainstep:
         break
 
-    # # update Learning Rate
-    # if count==100000 or count==150000:
-    #     Lr = Lr*0.2
-    #     for param_group in optimizer.param_groups:
-    #         param_group['lr'] = Lr
+    # update Learning Rate
+    if count==30000 or count==37000:
+        Lr = Lr*0.2
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = Lr
 
 import matplotlib.pyplot as plt
 group = 10

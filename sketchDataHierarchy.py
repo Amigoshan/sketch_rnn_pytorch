@@ -1,6 +1,7 @@
 import numpy as np
 from os.path import isfile, join, isdir
 from torch.utils.data import Dataset
+import matplotlib.pyplot as plt
 
 class SketchDatasetHierarchy(Dataset):
     """Class for loading data.
@@ -81,7 +82,7 @@ class SketchDatasetHierarchy(Dataset):
             #     continue
             lineLenList = [] #np.zeros(self.max_line_number)
             for line in lines:
-                lineLenList.append(len(line))
+                lineLenList.append(len(line)+1) # append [0, 0] to indicate line ending
                 # lineLenList[line_ind] = len(line)
 
             if np.max(np.array(lineLenList)) > self.max_line_length: # too many points in one stroke
@@ -233,6 +234,21 @@ class SketchDatasetHierarchy(Dataset):
             line_np = np.array(line)
             plt.plot(line_np[:,0],0-line_np[:,1])
         plt.show()
+
+    def drawPaddedLine(self, paddedLine, line_len=None):
+        if line_len is None:
+            line_len = len(paddedLine)
+        paddedLine = self.denormalize(paddedLine)
+        line_draw = []
+        x, y = 0, 0
+        for i in range(line_len):
+            x += float(paddedLine[i, 0])
+            y += float(paddedLine[i, 1])
+            line_draw.append([x, y])
+        line_np = np.array(line_draw)
+        plt.plot(line_np[:,0],0-line_np[:,1])
+        plt.show()
+
 
 
 if __name__=='__main__':
