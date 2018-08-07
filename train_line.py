@@ -13,7 +13,7 @@ from torch.utils.data import Dataset, DataLoader
 
 import visdom
 
-exp_prefix = '2_2_'
+exp_prefix = '2_3_'
 
 Lr = 0.001
 Batch = 32
@@ -61,18 +61,18 @@ loss_win = vis.line(X=np.array([-1]), Y=np.array([0]),
                          opts=dict(xlabel='steps', ylabel='loss', title=exp_prefix[0:-1]+'loss'))
 loss_cons_win = vis.line(X=np.array([-1]), Y=np.array([0]),
                         opts=dict(xlabel='steps', ylabel='loss', title=exp_prefix[0:-1]+'cons loss'))
-# loss_stroke_win = vis.line(X=np.array([-1]), Y=np.array([0]),
-#                         opts=dict(xlabel='steps', ylabel='loss', title=exp_prefix[0:-1]+'stroke loss'))
+loss_loc_win = vis.line(X=np.array([-1]), Y=np.array([0]),
+                        opts=dict(xlabel='steps', ylabel='loss', title=exp_prefix[0:-1]+'loc loss'))
 loss_kl_win = vis.line(X=np.array([-1]), Y=np.array([0]),
                         opts=dict(xlabel='steps', ylabel='loss', title=exp_prefix[0:-1]+'kl loss'))
 
 count = 0
 lossplot_cons = []
-lossplot_stroke = []
+lossplot_loc = []
 lossplot_kl = []
 lossplot = []
 running_loss_cons = 0.0
-running_loss_stroke = 0.0
+running_loss_loc = 0.0
 running_loss_kl = 0.0
 running_loss = 0.0
 
@@ -98,7 +98,10 @@ while True:
     loss_cons = criterion_mse(outputVar, targetVar.cuda())   
     # loss_kl = ((std*std+mean*mean)/2 - std.log() - 0.5).sum()
     loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).mean()/2.0
-    loss =  loss_cons + loss_kl  # 
+
+    loss_loc = criterion_mse(outputVar[0,:,:], targetVar[0,:,:].cuda()) * 10
+
+    loss =  loss_cons + loss_kl + loss_loc  # 
     loss.backward()
 
     # torch.nn.utils.clip_grad_norm(sketchnet.parameters(), ClipNorm)
@@ -117,34 +120,34 @@ while True:
     #     dataset.drawPaddedLine(outputLine)
 
     running_loss_cons += loss_cons.item()
-    # running_loss_stroke += loss_stroke.item()
+    running_loss_loc += loss_loc.item()
     running_loss_kl += loss_kl.item()
     running_loss += loss.item()
     if count % Showiter == 0:    # print every 20 mini-batches
         timestr = time.strftime('%m/%d %H:%M:%S',time.localtime())
-        print(exp_prefix[0:-1] + ' [%d %s] loss: %.5f, cons_loss: %.5f, kl_loss: %.5f, lr: %f' %
-        (count , timestr, running_loss / Showiter, running_loss_cons / Showiter, 
+        print(exp_prefix[0:-1] + ' [%d %s] loss: %.5f, cons_loss: %.5f %5f, kl_loss: %.5f, lr: %f' %
+        (count , timestr, running_loss / Showiter, running_loss_cons / Showiter, running_loss_loc / Showiter, 
             running_loss_kl / Showiter, Lr))
         running_loss = 0.0
         running_loss_cons = 0.0
-        # running_loss_stroke = 0.0
+        running_loss_loc = 0.0
         running_loss_kl = 0.0
 
     lossplot.append(loss.item())
     lossplot_kl.append(loss_kl.item())
     lossplot_cons.append(loss_cons.item())
-    # lossplot_stroke.append(loss_stroke.item())
+    lossplot_loc.append(loss_loc.item())
 
     vis.line(X=np.array([count]), Y=np.array([loss.item()]), win=loss_win, update='append')
     vis.line(X=np.array([count]), Y=np.array([loss_cons.item()]), win=loss_cons_win, update='append')
-    # vis.line(X=np.array([count]), Y=np.array([loss_stroke.item()]), win=loss_stroke_win, update='append')
+    vis.line(X=np.array([count]), Y=np.array([loss_loc.item()]), win=loss_loc_win, update='append')
     vis.line(X=np.array([count]), Y=np.array([loss_kl.item()]), win=loss_kl_win, update='append')
 
     if (count)%Snapshot==0:
         torch.save(sketchnet.state_dict(), paramName+'_'+str(count)+'.pkl')
         np.save(join(datadir,exp_prefix+'lossklplot.npy'), lossplot_kl)
         np.save(join(datadir,exp_prefix+'lossconsplot.npy'), lossplot_cons)
-        # np.save(join(datadir,exp_prefix+'lossstrokeplot.npy'), lossplot_stroke)
+        np.save(join(datadir,exp_prefix+'losslocplot.npy'), lossplot_loc)
         np.save(join(datadir,exp_prefix+'lossplot.npy'), lossplot)
 
 
