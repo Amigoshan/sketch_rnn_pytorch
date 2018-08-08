@@ -5,6 +5,7 @@ import numpy as np
 from os.path import join
 import time
 from utils import loadPretrain
+import matplotlib.pyplot as plt
 
 from hierarchical_sketch_rnn import StrokeRnn
 from sketchDataHierarchy import SketchDatasetHierarchy
@@ -27,8 +28,8 @@ InputNum = 2
 HiddenNum = 512
 OutputNum = 2
 ClipNorm = 0.1
-LoadPretrain = False
-modelname = 'models/2_1_sketchrnn_30000.pkl'
+LoadPretrain = True
+modelname = 'models/2_2_sketchrnn_40000.pkl'
 
 exp_name = exp_prefix+'sketchrnn'
 paramName = 'models/'+ exp_name
@@ -42,7 +43,7 @@ datadir = 'logdata'
 with np.load(join(datapath, filecat)) as cat_data:
     train_cat, val_cat, test_cat = cat_data['train'], cat_data['valid'], cat_data['test']
 
-dataset = SketchDatasetHierarchy(train_cat)
+dataset = SketchDatasetHierarchy(test_cat)
 # dataloader = DataLoader(dataset, batch_size=Batch, shuffle=True, num_workers=2)
 # dataiter = iter(dataloader)
 
@@ -110,14 +111,27 @@ while True:
 
     optimizer.step()
 
-    # # visualize the trained lines:
-    # for k in range(inputVar.size(0)):
-    #     inputLine = inputVar[:,k,:].cpu().numpy()
-    #     print inputLine
-    #     dataset.drawPaddedLine(inputLine)
-    #     outputLine = outputVar[:,k,:].detach().cpu().numpy()
-    #     print outputLine
-    #     dataset.drawPaddedLine(outputLine)
+    # visualize the trained lines:
+    for k in range(inputVar.size(0)):
+
+        inputLine = inputVar[:,k,:].cpu().numpy()
+        print inputLine
+        line1 = dataset.returnPaddedLine(inputLine)
+        outputLine = outputVar[:,k,:].detach().cpu().numpy()
+        print outputLine
+        line2 = dataset.returnPaddedLine(outputLine)
+
+        fig = plt.figure(1, (20, 5))
+        axis = fig.subplots(1, 2)
+
+        axis[0].plot(line1[:,0],0-line1[:,1],'o-')
+        axis[0].set_ylim(-200, 200);axis[0].set_xlim(-400, 400)
+        axis[0].grid()
+        axis[1].plot(line2[:,0],0-line2[:,1],'o-')
+        axis[1].set_ylim(-200, 200);axis[1].set_xlim(-400, 400)
+        axis[1].grid()
+        plt.show()
+
 
     running_loss_cons += loss_cons.item()
     running_loss_loc += loss_loc.item()
