@@ -77,16 +77,11 @@ class StrokeRnn(nn.Module):
 
 
 class SketchRnn(nn.Module):
-    def __init__(self, inputNum, hiddenNum, outputNum):
+    def __init__(self, inputNum, lineHiddenNum, sketchHiddenNum, outputNum):
         super(SketchRnn, self).__init__()
-        self.hiddenNum = hiddenNum
-        self.encoder = nn.LSTM(inputNum, hiddenNum)
-        self.mean = nn.Linear(hiddenNum, hiddenNum)
-        self.logstd = nn.Linear(hiddenNum, hiddenNum)
-        self.decoderH = nn.Linear(hiddenNum, hiddenNum)
-        self.decoderC = nn.Linear(hiddenNum, hiddenNum)
-        self.decoder = nn.LSTM(inputNum+hiddenNum, hiddenNum) # the input is combined with the coding
-        self.output = nn.Linear(hiddenNum, outputNum)
+        self.hiddenNum  = hiddenNum
+        self.linerRnn = StrokeRnn(inputNum, lineHiddenNum, outputNum)
+        self.sketchRnn = StrokeRnn(lineHiddenNum, sketchHiddenNum, lineHiddenNum)
 
     def forward(self, x, seq_len, testing=False, use_gt=False):
         """
@@ -145,14 +140,22 @@ class SketchRnn(nn.Module):
         # import ipdb; ipdb.set_trace()
         return meanVar, logstdVar, outputVar
 
+    def forward(self, x, seq_len, sketch_len):
+        (seqNum, batchNum, inputNum) = x.size()  
+        lineCode, LineMeanVar, LineLogstdVar = self.linerRnn.encode(x, seq_len, batchNum)
 
-    def init_hidden(self, batchNum):
-        return torch.zeros(self.bidirScale, batchNum, self.hiddenNum).cuda(), \
-                torch.zeros(self.bidirScale, batchNum, self.hiddenNum).cuda()
+        # TODO: reshape and pad the lineCode
 
 
-    def calc_loss(outputVar, targetVar):
-        pass
+        lineCodeRecons, meanVar, logstdVar = self.sketchRnn(lineCode, sketch_len)
+
+        # TODO: how to decide the decoded sequence length
+
+
+        outputVar = self.decode(lineCodeRecons, batchNum, seqNum)
+
+        return outputVar, LineMeanVar, LineLogstdVar, meanVar, logstdVar
+
 
 
 if __name__ == '__main__':

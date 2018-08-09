@@ -125,13 +125,18 @@ class MyWF(WorkFlow.WorkFlow):
         self.AV["loss_kl"].push_back(loss_kl.item())
         self.AV["loss_loc"].push_back(loss_loc.item())
 
-
         if ( self.countTrain % Snapshot == 0 ):
             self.write_accumulated_values()
             self.save_model(self.sketchnet, saveModelName)
 
         # Plot accumulated values.
         self.plot_accumulated_values()
+
+        # update Learning Rate
+        if self.countTrain==30000 or self.countTrain==37000:
+            Lr = Lr*0.2
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = Lr
 
 
     # Overload the function test().
