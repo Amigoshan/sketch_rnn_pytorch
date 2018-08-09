@@ -1,4 +1,3 @@
-from workflow import WorkFlow
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -13,40 +12,43 @@ from hierarchical_sketch_rnn import StrokeRnn
 from sketchDataHierarchy import SketchDatasetHierarchy
 
 import visdom
+import sys
+sys.path.append('../WorkFlow')
+from workflow import WorkFlow
 
-exp_prefix = '2_3_'
+exp_prefix = '2_6_'
 
 Lr = 0.001
 Batch = 32
+TestBatch = 5
 Trainstep = 40000
 Showiter = 10
 Snapshot = 10000
-Visiter = 2000
-Bidirection = True
+# Visiter = 2000
+# Bidirection = False
 
 InputNum = 2
-HiddenNum = 512
+HiddenNum = 256
 OutputNum = 2
 ClipNorm = 0.1
-LoadPretrain = True
+LoadPretrain = False
 modelname = 'models/2_3_sketchrnn_40000.pkl'
 
-exp_name = exp_prefix+'sketchrnn'
-paramName = 'models/'+ exp_name
+lambda_loc = 2.0
+lambda_kl = 0.5
 
 datapath = './data'
 filecat = 'sketchrnn_cat.npz'
-imgoutdir = 'resimg'
-datadir = 'logdata'
+saveModelName = 'sketch_line'
 
 
 # Template for custom WorkFlow object.
 class MyWF(WorkFlow.WorkFlow):
-    def __init__(self, workingDir):
-        super(MyWF, self).__init__(workingDir)
+    def __init__(self, workingDir, prefix = "", suffix = ""):
+        super(MyWF, self).__init__(workingDir, prefix, suffix)
 
         # === Custom member variables. ===
-        # self.countTrain = 0
+        self.countTrain = 0
         # self.countTest  = 0
         with np.load(join(datapath, filecat)) as cat_data:
             train_cat, val_cat, test_cat = cat_data['train'], cat_data['valid'], cat_data['test']
@@ -60,13 +62,14 @@ class MyWF(WorkFlow.WorkFlow):
         self.sketchnet.cuda()
 
         self.criterion_mse = nn.MSELoss(size_average=True)
-        self.criterion_ce = nn.CrossEntropyLoss(weight=torch.Tensor([1,10,100]).cuda(), size_average=Bidirection)
+        # self.criterion_ce = nn.CrossEntropyLoss(weight=torch.Tensor([1,10,100]).cuda(), size_average=Bidirection)
         self.optimizer = optim.Adam(self.sketchnet.parameters(), lr = Lr) #,weight_decay=1e-5)
 
         # === Create the AccumulatedObjects. ===
         self.AV['loss'].avgWidth =  100
         self.add_accumulated_value("loss_cons", 100)
-        self.add_accumulated_value("loss_kl")
+        self.add_accumulated_value("loss_kl", 100)
+        self.add_accumulated_value("loss_loc", 100)
         self.add_accumulated_value("test_loss")
 
         # === Create a AccumulatedValuePlotter object for ploting. ===
@@ -74,10 +77,10 @@ class MyWF(WorkFlow.WorkFlow):
                 "train_test_loss", self.AV, ['loss', 'test_loss'], [True, False]))
 
         self.AVP.append(WorkFlow.VisdomLinePlotter(\
-                "loss_cons", self.AV, ["loss_cons"], [True]))
+                "loss_cons", self.AV, ["loss_cons", "loss_kl"], [True, True]))
 
         self.AVP.append(WorkFlow.VisdomLinePlotter(\
-                "loss_kl", self.AV, ["loss_kl"], [True]))
+                "loss_cons", self.AV, ["loss_loc"], [True]))
 
     # Overload the function initialize().
     def initialize(self):
@@ -91,6 +94,8 @@ class MyWF(WorkFlow.WorkFlow):
         super(MyWF, self).train()
 
         # === Custom code. ===
+        self.countTrain += 1
+
         sketchLines, sketchLinelen, sketchLinenum, sketchLinelenFlat = self.dataset.get_random_batch(Batch)
         inputVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
         # sketchLinelen = [item for sublist in sketchLinelen for item in sublist]
@@ -101,26 +106,29 @@ class MyWF(WorkFlow.WorkFlow):
         # TODO: there could be too much zero that bias the training
         targetVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
 
-        loss_cons = criterion_mse(outputVar, targetVar.cuda())   
+        loss_cons = self.criterion_mse(outputVar, targetVar.cuda())   
         loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).mean()/2.0
-        loss_loc = criterion_mse(outputVar[0,:,:], targetVar[0,:,:].cuda()) * 2
+        loss_loc = self.criterion_mse(outputVar[0,:,:], targetVar[0,:,:].cuda()) * lambda_loc
 
-        loss =  loss_cons + loss_kl + loss_loc  # 
+        loss =  loss_cons + loss_kl * lambda_kl + loss_loc  # 
         loss.backward()
 
+        # torch.nn.utils.clip_grad_norm(sketchnet.parameters(), ClipNorm)
+        for param in self.sketchnet.parameters():
+            param.grad.clamp_(-ClipNorm, ClipNorm) 
+
+        self.optimizer.step()
 
 
-        self.AV["loss"].push_back(math.sin( self.countTrain*0.1 ), self.countTrain*0.1)
-        self.AV["loss_cons"].push_back(math.cos( self.countTrain*0.1 ), self.countTrain*0.1)
-        self.AV["loss_kl"].push_back(math.cos( self.countTrain*0.1 ), self.countTrain*0.1)
-        self.AV["test_loss"].push_back(math.cos( self.countTrain*0.1 ), self.countTrain*0.1)
+        self.AV["loss"].push_back(loss.item())
+        self.AV["loss_cons"].push_back(loss_cons.item())
+        self.AV["loss_kl"].push_back(loss_kl.item())
+        self.AV["loss_loc"].push_back(loss_loc.item())
 
 
         if ( self.countTrain % Snapshot == 0 ):
             self.write_accumulated_values()
-            self.save_model()
-
-        self.countTrain += 1
+            self.save_model(self.sketchnet, saveModelName)
 
         # Plot accumulated values.
         self.plot_accumulated_values()
@@ -131,19 +139,23 @@ class MyWF(WorkFlow.WorkFlow):
         super(MyWF, self).test()
 
         # === Custom code. ===
+        sketchLines, sketchLinelen, sketchLinenum, sketchLinelenFlat = self.valset.get_random_batch(TestBatch)
+        inputVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
+        outputVar, mean, logstd= self.sketchnet(inputVar.cuda(), sketchLinelenFlat)
 
-        self.logger.info("Train #%d - loss: %.5f, cons_loss: %.5f , kl_loss: %.5f, lr: %f" \
-            % self.countTrain, self.AV['lost'].last(), self.AV['loss_cons'].last, 
-            self.AV['kl_loss'].last(), Lr )
+        targetVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
 
+        loss_cons = self.criterion_mse(outputVar, targetVar.cuda())   
+        loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).mean()/2.0
+        loss_loc = self.criterion_mse(outputVar[0,:,:], targetVar[0,:,:].cuda()) * lambda_loc
 
-        # # Test the existance of an AccumulatedValue object.
-        # if ( True == self.have_accumulated_value("lossTest") ):
-        #     self.AV["lossTest"].push_back(0.01, self.countTest)
-        # else:
-        #     self.logger.info("Could not find \"lossTest\"")
+        loss =  loss_cons + loss_kl * lambda_kl + loss_loc  # 
 
-        # self.logger.info("Tested.")
+        self.AV["test_loss"].push_back(loss.item(), self.countTrain)
+
+        losslogstr = self.get_log_str()
+        self.logger.info("Train #%d - %s lr: %.6f" % (self.countTrain, losslogstr, Lr))
+
 
     # Overload the function finalize().
     def finalize(self):
@@ -155,27 +167,31 @@ class MyWF(WorkFlow.WorkFlow):
 if __name__ == "__main__":
     print("Hello WorkFlow.")
 
-    self.print_delimeter(title = "Before initialization.")
+    # wf.print_delimeter(title = "Before initialization.")
 
     try:
         # Instantiate an object for MyWF.
-        wf = MyWF("./")
-        wf.verbose = True
+        wf = MyWF("./", prefix = exp_prefix)
 
         # Initialization.
-        self.print_delimeter(title = "Initialize.")
+        # wf.print_delimeter(title = "Initialize.")
         wf.initialize()
 
         # Training loop.
-        self.print_delimeter(title = "Loop.")
+        # wf.print_delimeter(title = "Loop.")
 
-        for i in range(100):
+        while True:
             wf.train()
+            if wf.countTrain%Showiter==0:
+                wf.test()
+
+            if (wf.countTrain>Trainstep):
+                break
 
         # Test and finalize.
-        self.print_delimeter(title = "Test and finalize.")
+        # wf.print_delimeter(title = "Test and finalize.")
 
-        wf.test()
+        # wf.test()
         wf.finalize()
 
         # # Show the accululated values.

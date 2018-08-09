@@ -14,7 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 
 import visdom
 
-exp_prefix = '2_3_'
+exp_prefix = '2_5_'
 
 Lr = 0.001
 Batch = 32
@@ -29,7 +29,7 @@ HiddenNum = 512
 OutputNum = 2
 ClipNorm = 0.1
 LoadPretrain = True
-modelname = 'models/2_2_sketchrnn_40000.pkl'
+modelname = 'models/2_4_sketchrnn_40000.pkl'
 
 exp_name = exp_prefix+'sketchrnn'
 paramName = 'models/'+ exp_name
@@ -43,7 +43,7 @@ datadir = 'logdata'
 with np.load(join(datapath, filecat)) as cat_data:
     train_cat, val_cat, test_cat = cat_data['train'], cat_data['valid'], cat_data['test']
 
-dataset = SketchDatasetHierarchy(test_cat)
+dataset = SketchDatasetHierarchy(train_cat)
 # dataloader = DataLoader(dataset, batch_size=Batch, shuffle=True, num_workers=2)
 # dataiter = iter(dataloader)
 
@@ -100,9 +100,9 @@ while True:
     # loss_kl = ((std*std+mean*mean)/2 - std.log() - 0.5).sum()
     loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).mean()/2.0
 
-    loss_loc = criterion_mse(outputVar[0,:,:], targetVar[0,:,:].cuda()) * 10
+    loss_loc = criterion_mse(outputVar[0,:,:], targetVar[0,:,:].cuda()) * 2
 
-    loss =  loss_cons + loss_kl + loss_loc  # 
+    loss =  loss_cons *0.2 + loss_kl  + loss_loc *0.2  # 
     loss.backward()
 
     # torch.nn.utils.clip_grad_norm(sketchnet.parameters(), ClipNorm)
@@ -121,14 +121,14 @@ while True:
         print outputLine
         line2 = dataset.returnPaddedLine(outputLine)
 
-        fig = plt.figure(1, (20, 5))
+        fig = plt.figure(1, (20, 7))
         axis = fig.subplots(1, 2)
 
         axis[0].plot(line1[:,0],0-line1[:,1],'o-')
-        axis[0].set_ylim(-200, 200);axis[0].set_xlim(-400, 400)
+        axis[0].set_ylim(-300, 300);axis[0].set_xlim(-400, 400)
         axis[0].grid()
         axis[1].plot(line2[:,0],0-line2[:,1],'o-')
-        axis[1].set_ylim(-200, 200);axis[1].set_xlim(-400, 400)
+        axis[1].set_ylim(-300, 300);axis[1].set_xlim(-400, 400)
         axis[1].grid()
         plt.show()
 
