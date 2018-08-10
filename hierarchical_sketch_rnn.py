@@ -80,15 +80,14 @@ class StrokeRnn(nn.Module):
 class SketchRnn(nn.Module):
     def __init__(self, inputNum, lineHiddenNum, sketchHiddenNum, outputNum):
         super(SketchRnn, self).__init__()
-        self.hiddenNum  = hiddenNum
         self.lineHiddenNum = lineHiddenNum
-        self.linerRnn = StrokeRnn(inputNum, lineHiddenNum, outputNum)
+        self.lineRnn = StrokeRnn(inputNum, lineHiddenNum, outputNum)
         self.sketchRnn = StrokeRnn(lineHiddenNum, sketchHiddenNum, lineHiddenNum)
 
     def forward(self, x, line_len, sketch_len):
         (seqNum, lineBatch, inputNum) = x.size()  
         sketchBatch = len(sketch_len)
-        lineCode, LineMeanVar, LineLogstdVar = self.linerRnn.encode(x, line_len, lineBatch)
+        lineCode, LineMeanVar, LineLogstdVar = self.lineRnn.encode(x, line_len, lineBatch)
 
         # reshape and pad the lineCode
         maxlen = max(sketch_len) + 1 # pad one zero-sequence as eof
@@ -112,10 +111,23 @@ class SketchRnn(nn.Module):
             endStrokeCode = torch.cat((endStrokeCode, lineCodeRecons[slen:slen+1, ind, :]))
 
         # import ipdb; ipdb.set_trace()
-        outputVar = self.linerRnn.decode(lineDecodeInput, lineBatch, seqNum)
+        outputVar = self.lineRnn.decode(lineDecodeInput, lineBatch, seqNum)
 
         return outputVar, endStrokeCode, LineMeanVar, LineLogstdVar, meanVar, logstdVar
 
+    def get_high_params(self):
+        return self.sketchRnn.parameters()
+
+    def load_line_model(self, lineModelName):
+        preTrainDict = torch.load(lineModelName)
+        model_dict = self.state_dict()
+        load_dict = {}
+        for k,v in preTrainDict.items():
+            load_dict['lineRnn.'+k] = v
+        for item in load_dict:
+            print('  Load pretrained layer: ',item )
+        model_dict.update(load_dict)
+        self.load_state_dict(model_dict)
 
 
 if __name__ == '__main__':
@@ -132,11 +144,22 @@ if __name__ == '__main__':
     # inputVar = torch.randn(seqNum, batchNum, inputNum).cuda()
     # outputVar = rnn(inputVar, range(seqNum,seqNum-batchNum,-1))
 
-    # test SketchRNN
-    rnn = SketchRnn(inputNum, hiddenNum, hiddenNum2, outputNum)
-    rnn.cuda()
-    maxLineLen = 20
-    inputVar = torch.randn(maxLineLen, sum(lineNum), inputNum).cuda()
-    outputVar, endStrokeCode, LineMeanVar, LineLogstdVar, meanVar, logstdVar = rnn(inputVar, lineLen, lineNum)
+    # # test SketchRNN
+    # rnn = SketchRnn(inputNum, hiddenNum, hiddenNum2, outputNum)
+    # rnn.cuda()
+    # maxLineLen = 20
+    # inputVar = torch.randn(maxLineLen, sum(lineNum), inputNum).cuda()
+    # outputVar, endStrokeCode, LineMeanVar, LineLogstdVar, meanVar, logstdVar = rnn(inputVar, lineLen, lineNum)
 
+
+    # test load_line
+    InputNum = 2
+    HiddenNumLine = 512
+    HiddenNumSketch = 256
+    OutputNum = 2
+    LineModel = 'models/2_4_sketchrnn_40000.pkl'
+    sketchnet = SketchRnn(InputNum, HiddenNumLine, HiddenNumSketch, OutputNum)
     import ipdb; ipdb.set_trace() 
+    sketchnet.load_line_model(LineModel)
+    import ipdb; ipdb.set_trace() 
+

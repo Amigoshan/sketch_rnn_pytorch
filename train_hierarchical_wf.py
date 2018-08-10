@@ -8,7 +8,7 @@ from os.path import join
 import time
 import matplotlib.pyplot as plt
 
-from hierarchical_sketch_rnn import StrokeRnn
+from hierarchical_sketch_rnn import SketchRnn
 from sketchDataHierarchy import SketchDatasetHierarchy
 
 import visdom
@@ -16,7 +16,7 @@ import sys
 sys.path.append('../WorkFlow')
 from workflow import WorkFlow
 
-exp_prefix = '2_7_2_'
+exp_prefix = '3_1_'
 
 Lr = 0.001
 LrDecrease = [30000, 37000]
@@ -25,22 +25,23 @@ TestBatch = 5
 Trainstep = 10000
 Showiter = 10
 Snapshot = 10000
-# Visiter = 2000
-# Bidirection = False
 
 InputNum = 2
-HiddenNum = 256
+HiddenNumLine = 512
+HiddenNumSketch = 256
 OutputNum = 2
 ClipNorm = 0.1
-LoadPretrain = True
-modelname = 'models/2_7_sketch_line_30000.pkl'
+LoadPretrain = False
+modelname = ''
+LoadLineModel = True
+LineModel = 'models/2_4_sketchrnn_40000.pkl'
 
-lambda_loc = 1.0
+lambda_eof = 0.1
 lambda_kl = 0.3
 
 datapath = './data'
 filecat = 'sketchrnn_cat.npz'
-saveModelName = 'sketch_line'
+saveModelName = 'hierarchical_sketch'
 
 
 # Template for custom WorkFlow object.
@@ -57,20 +58,22 @@ class MyWF(WorkFlow.WorkFlow):
         self.dataset = SketchDatasetHierarchy(train_cat)
         self.valset = SketchDatasetHierarchy(val_cat)
 
-        self.sketchnet = StrokeRnn(InputNum, HiddenNum, OutputNum)
+        self.sketchnet = SketchRnn(InputNum, HiddenNumLine, HiddenNumSketch, OutputNum)
         if LoadPretrain:
             self.sketchnet = self.load_model(self.sketchnet, modelname)
+        if LoadLineModel:
+            self.sketchnet.load_line_model(LineModel)
+
         self.sketchnet.cuda()
 
-        self.criterion_mse = nn.MSELoss(size_average=True)
-        # self.criterion_ce = nn.CrossEntropyLoss(weight=torch.Tensor([1,10,100]).cuda(), size_average=Bidirection)
-        self.optimizer = optim.Adam(self.sketchnet.parameters(), lr = Lr) #,weight_decay=1e-5)
+        self.criterion_mse = nn.MSELoss()
+        self.optimizer = optim.Adam(self.sketchnet.get_high_params(), lr = Lr) #,weight_decay=1e-5)
 
         # === Create the AccumulatedObjects. ===
         self.AV['loss'].avgWidth =  100
         self.add_accumulated_value("loss_cons", 100)
         self.add_accumulated_value("loss_kl", 100)
-        self.add_accumulated_value("loss_loc", 100)
+        self.add_accumulated_value("loss_eof", 100)
         self.add_accumulated_value("test_loss")
 
         # === Create a AccumulatedValuePlotter object for ploting. ===
@@ -78,10 +81,13 @@ class MyWF(WorkFlow.WorkFlow):
                 "train_test_loss", self.AV, ['loss', 'test_loss'], [True, False]))
 
         self.AVP.append(WorkFlow.VisdomLinePlotter(\
-                "loss_cons", self.AV, ["loss_cons", "loss_kl"], [True, True]))
+                "loss_cons", self.AV, ["loss_kl"], [True]))
 
         self.AVP.append(WorkFlow.VisdomLinePlotter(\
-                "loss_cons", self.AV, ["loss_loc"], [True]))
+                "loss_cons", self.AV, ["loss_cons"], [True]))
+
+        self.AVP.append(WorkFlow.VisdomLinePlotter(\
+                "loss_eof", self.AV, ["loss_eof"], [True]))
 
     # Overload the function initialize().
     def initialize(self):
@@ -99,8 +105,8 @@ class MyWF(WorkFlow.WorkFlow):
 
         sketchLines, sketchLinelen, sketchLinenum, sketchLinelenFlat = self.dataset.get_random_batch(Batch)
         inputVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
-        # sketchLinelen = [item for sublist in sketchLinelen for item in sublist]
-        outputVar, mean, logstd= self.sketchnet(inputVar.cuda(), sketchLinelenFlat)
+
+        outputVar, endStrokeCode, _, _, mean, logstd = self.sketchnet(inputVar.cuda(), sketchLinelenFlat, sketchLinenum)
 
         # zero the parameter gradients
         self.optimizer.zero_grad()
@@ -109,9 +115,9 @@ class MyWF(WorkFlow.WorkFlow):
 
         loss_cons = self.criterion_mse(outputVar, targetVar.cuda())   
         loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).mean()/2.0
-        loss_loc = self.criterion_mse(outputVar[0,:,:], targetVar[0,:,:].cuda()) * lambda_loc
+        loss_eof = self.criterion_mse(endStrokeCode, torch.zeros_like(endStrokeCode).cuda()) 
 
-        loss =  loss_cons + loss_kl * lambda_kl + loss_loc  # 
+        loss =  loss_cons + loss_kl * lambda_kl + loss_eof * lambda_eof # 
         loss.backward()
 
         # torch.nn.utils.clip_grad_norm(sketchnet.parameters(), ClipNorm)
@@ -124,7 +130,7 @@ class MyWF(WorkFlow.WorkFlow):
         self.AV["loss"].push_back(loss.item())
         self.AV["loss_cons"].push_back(loss_cons.item())
         self.AV["loss_kl"].push_back(loss_kl.item())
-        self.AV["loss_loc"].push_back(loss_loc.item())
+        self.AV["loss_eof"].push_back(loss_eof.item())
 
         if ( self.countTrain % Snapshot == 0 ):
             self.write_accumulated_values()
@@ -140,15 +146,16 @@ class MyWF(WorkFlow.WorkFlow):
         # === Custom code. ===
         sketchLines, sketchLinelen, sketchLinenum, sketchLinelenFlat = self.valset.get_random_batch(TestBatch)
         inputVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
-        outputVar, mean, logstd= self.sketchnet(inputVar.cuda(), sketchLinelenFlat)
+
+        outputVar, endStrokeCode, _, _, mean, logstd = self.sketchnet(inputVar.cuda(), sketchLinelenFlat, sketchLinenum)
 
         targetVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
 
         loss_cons = self.criterion_mse(outputVar, targetVar.cuda())   
         loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).mean()/2.0
-        loss_loc = self.criterion_mse(outputVar[0,:,:], targetVar[0,:,:].cuda()) * lambda_loc
+        loss_eof = self.criterion_mse(endStrokeCode, torch.zeros_like(endStrokeCode).cuda()) 
 
-        loss =  loss_cons + loss_kl * lambda_kl + loss_loc  # 
+        loss =  loss_cons + loss_kl * lambda_kl + loss_eof * lambda_eof # 
 
         self.AV["test_loss"].push_back(loss.item(), self.countTrain)
 
