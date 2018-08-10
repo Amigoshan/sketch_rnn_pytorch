@@ -37,7 +37,7 @@ LoadLineModel = True
 LineModel = 'models/2_4_sketchrnn_40000.pkl'
 
 lambda_eof = 0.1
-lambda_kl = 0.3
+lambda_kl = 0.1
 
 datapath = './data'
 filecat = 'sketchrnn_cat.npz'
@@ -81,7 +81,7 @@ class MyWF(WorkFlow.WorkFlow):
                 "train_test_loss", self.AV, ['loss', 'test_loss'], [True, False]))
 
         self.AVP.append(WorkFlow.VisdomLinePlotter(\
-                "loss_cons", self.AV, ["loss_kl"], [True]))
+                "loss_kl", self.AV, ["loss_kl"], [True]))
 
         self.AVP.append(WorkFlow.VisdomLinePlotter(\
                 "loss_cons", self.AV, ["loss_cons"], [True]))
