@@ -1,6 +1,7 @@
 import torch 
 import torch.nn as nn
 from utils import output_to_strokes
+import numpy as np
 
 class StrokeRnn(nn.Module): 
     '''
@@ -80,81 +81,40 @@ class SketchRnn(nn.Module):
     def __init__(self, inputNum, lineHiddenNum, sketchHiddenNum, outputNum):
         super(SketchRnn, self).__init__()
         self.hiddenNum  = hiddenNum
+        self.lineHiddenNum = lineHiddenNum
         self.linerRnn = StrokeRnn(inputNum, lineHiddenNum, outputNum)
         self.sketchRnn = StrokeRnn(lineHiddenNum, sketchHiddenNum, lineHiddenNum)
 
-    def forward(self, x, seq_len, testing=False, use_gt=False):
-        """
-        x:       network input, should be in shape (seq, batch, inputNum)
-        seq_len: a list indicating the length of each sequence in the batch
-        testing: the decoder use previous output as next input
-        """
-        (seqNum, batchNum, inputNum) = x.size()    
-        seqNum -= 1     
-        # import ipdb; ipdb.set_trace()
+    def forward(self, x, line_len, sketch_len):
+        (seqNum, lineBatch, inputNum) = x.size()  
+        sketchBatch = len(sketch_len)
+        lineCode, LineMeanVar, LineLogstdVar = self.linerRnn.encode(x, line_len, lineBatch)
 
-        x_pack = nn.utils.rnn.pack_padded_sequence(x[1:,:,:], seq_len, batch_first=False) # first in sequence is S0 used by decoder
+        # reshape and pad the lineCode
+        maxlen = max(sketch_len) + 1 # pad one zero-sequence as eof
+        sketchInput = torch.zeros((0)).cuda()
+        ind = 0
+        for ind, slen in enumerate(sketch_len):
+            sketchInput = torch.cat((sketchInput, lineCode[ind:ind+slen,:]))
+            ind += slen
+            sketchInput = torch.cat((sketchInput, torch.zeros((maxlen-slen,self.lineHiddenNum)).cuda())) # padding
+        sketchInput = sketchInput.view(sketchBatch, maxlen, -1)
+        sketchInput = torch.transpose(sketchInput, 0, 1)
 
-        _, (hn, _) = self.encoder(x_pack, self.init_hidden(batchNum)) # hn: 1 x batch x hidden
-        if self.bidir:
-            hn = torch.cat((hn[0,:,:], hn[1,:,:]), dim=1)
-        meanVar = self.mean(hn.view(batchNum, -1)) # batch x hidden
-        logstdVar = self.logstd(hn.view(batchNum, -1)) # batch x hidden
+        sketch_len_eof = list(np.array(sketch_len) + 1) # add one because of eof
+        lineCodeRecons, meanVar, logstdVar = self.sketchRnn(sketchInput, sketch_len_eof)
 
-        # sample from the mean and logstd
-        epsilon = torch.normal(mean=torch.zeros_like(meanVar))
-        sample = meanVar + (logstdVar/2).exp() * epsilon # batch x hidden
-
-        # hiddenInput = torch.tanh(self.aftersample(sample))
-        hn = torch.tanh(self.decoderH(sample)).view(1,batchNum,-1) 
-        cn = torch.tanh(self.decoderC(sample)).view(1,batchNum,-1) 
-        if not testing:
-            # shift the input one time step behind and concate with the coding sample
-            decoderInput = x[0:-1,:,:]
-            decoderInput = torch.cat((decoderInput, sample.detach().expand((seqNum, batchNum, self.hiddenNum))), dim=2)
-            dx_pack = nn.utils.rnn.pack_padded_sequence(decoderInput, seq_len, batch_first=False) 
-            outputVar, _ = self.decoder(dx_pack, (hn, cn))
-            outputVar = self.output(outputVar.data) # outputVar is in same order with x_pack
-
-        else: # if testing, the outputVar is already converted into one-hot stroke, and can not be backpropagated!
-            # import ipdb; ipdb.set_trace()
-            outlist = []
-            decoderInput = x[0:1,:,:]
-            decoderInput = torch.cat((decoderInput, sample.view((1, batchNum, self.hiddenNum))), dim=2) # 1 x batch x hidden
-            hidden = (hn, cn)
-            # if testing, input the data in sequence one by one
-            for k in range(seqNum):
-                outputVar, hidden = self.decoder(decoderInput, hidden)
-                outputVar = self.output(outputVar.view(-1, self.hiddenNum))
-                # calculate the stroke type using last three column 
-                outStroke = output_to_strokes(outputVar.detach().cpu().numpy())
-                outStroke = torch.from_numpy(outStroke).cuda()
-
-                outlist.append(outStroke)
-                if not use_gt:
-                    decoderInput = torch.cat((outStroke.view((1, batchNum, 5)), sample.view((1, batchNum, self.hiddenNum))), dim=2)
-                else: 
-                    decoderInput = torch.cat((x[k+1:k+2,:,:].view((1, batchNum, 5)), sample.view((1, batchNum, self.hiddenNum))), dim=2)
-            outputVar = torch.cat(outlist, dim=0) # (seq x batch) x ouput
+        # cat the lines in different batch 
+        lineDecodeInput = torch.zeros((0)).cuda() # should be same size with lineCode
+        endStrokeCode = torch.zeros((0)).cuda() # use for train eof of sketch
+        for ind, slen in enumerate(sketch_len):
+            lineDecodeInput = torch.cat((lineDecodeInput, lineCodeRecons[0:slen,ind,:]))
+            endStrokeCode = torch.cat((endStrokeCode, lineCodeRecons[slen:slen+1, ind, :]))
 
         # import ipdb; ipdb.set_trace()
-        return meanVar, logstdVar, outputVar
+        outputVar = self.linerRnn.decode(lineDecodeInput, lineBatch, seqNum)
 
-    def forward(self, x, seq_len, sketch_len):
-        (seqNum, batchNum, inputNum) = x.size()  
-        lineCode, LineMeanVar, LineLogstdVar = self.linerRnn.encode(x, seq_len, batchNum)
-
-        # TODO: reshape and pad the lineCode
-
-
-        lineCodeRecons, meanVar, logstdVar = self.sketchRnn(lineCode, sketch_len)
-
-        # TODO: how to decide the decoded sequence length
-
-
-        outputVar = self.decode(lineCodeRecons, batchNum, seqNum)
-
-        return outputVar, LineMeanVar, LineLogstdVar, meanVar, logstdVar
+        return outputVar, endStrokeCode, LineMeanVar, LineLogstdVar, meanVar, logstdVar
 
 
 
@@ -162,15 +122,21 @@ if __name__ == '__main__':
     batchNum = 7
     inputNum = 5
     hiddenNum = 128
+    hiddenNum2 = 64
     outputNum = 5
-    seqNum = 10
-    rnn = StrokeRnn(inputNum, hiddenNum, outputNum)
+    batchNum = 3
+    lineNum = [2, 5, 3]
+    lineLen = range(15,15-sum(lineNum),-1)
+    # rnn = StrokeRnn(inputNum, hiddenNum, outputNum)
+    # rnn.cuda()
+    # inputVar = torch.randn(seqNum, batchNum, inputNum).cuda()
+    # outputVar = rnn(inputVar, range(seqNum,seqNum-batchNum,-1))
+
+    # test SketchRNN
+    rnn = SketchRnn(inputNum, hiddenNum, hiddenNum2, outputNum)
     rnn.cuda()
-    inputVar = torch.randn(seqNum, batchNum, inputNum).cuda()
-    outputVar = rnn(inputVar, range(seqNum,seqNum-batchNum,-1))
+    maxLineLen = 20
+    inputVar = torch.randn(maxLineLen, sum(lineNum), inputNum).cuda()
+    outputVar, endStrokeCode, LineMeanVar, LineLogstdVar, meanVar, logstdVar = rnn(inputVar, lineLen, lineNum)
 
-    # testing multiple batch using pack_padded_sequence
-    # inputVar = torch.randn(seqNum, 10, inputNum)
-
-    
     import ipdb; ipdb.set_trace() 
