@@ -125,7 +125,6 @@ class MyWF(WorkFlow.WorkFlow):
         self.AV["loss_kl"].push_back(loss_kl.item())
         self.AV["loss_loc"].push_back(loss_loc.item())
 
-
         if ( self.countTrain % Snapshot == 0 ):
             self.write_accumulated_values()
             self.save_model(self.sketchnet, saveModelName+'_'+str(self.countTrain))
