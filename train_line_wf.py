@@ -16,12 +16,12 @@ import sys
 sys.path.append('../WorkFlow')
 from workflow import WorkFlow
 
-exp_prefix = '2_6_'
+exp_prefix = '2_7_2_'
 
 Lr = 0.001
 Batch = 32
 TestBatch = 5
-Trainstep = 40000
+Trainstep = 10000
 Showiter = 10
 Snapshot = 10000
 # Visiter = 2000
@@ -31,11 +31,11 @@ InputNum = 2
 HiddenNum = 256
 OutputNum = 2
 ClipNorm = 0.1
-LoadPretrain = False
-modelname = 'models/2_3_sketchrnn_40000.pkl'
+LoadPretrain = True
+modelname = 'models/2_7_sketch_line_30000.pkl'
 
-lambda_loc = 2.0
-lambda_kl = 0.5
+lambda_loc = 1.0
+lambda_kl = 0.3
 
 datapath = './data'
 filecat = 'sketchrnn_cat.npz'
@@ -128,11 +128,10 @@ class MyWF(WorkFlow.WorkFlow):
 
         if ( self.countTrain % Snapshot == 0 ):
             self.write_accumulated_values()
-            self.save_model(self.sketchnet, saveModelName)
+            self.save_model(self.sketchnet, saveModelName+'_'+str(self.countTrain))
 
         # Plot accumulated values.
         self.plot_accumulated_values()
-
 
     # Overload the function test().
     def test(self):
@@ -154,7 +153,7 @@ class MyWF(WorkFlow.WorkFlow):
         self.AV["test_loss"].push_back(loss.item(), self.countTrain)
 
         losslogstr = self.get_log_str()
-        self.logger.info("Train #%d - %s lr: %.6f" % (self.countTrain, losslogstr, Lr))
+        self.logger.info("%s #%d - %s lr: %.6f" % (exp_prefix[:-1], self.countTrain, losslogstr, Lr))
 
 
     # Overload the function finalize().
@@ -187,6 +186,12 @@ if __name__ == "__main__":
 
             if (wf.countTrain>Trainstep):
                 break
+
+            # update Learning Rate
+            if wf.countTrain==1 or wf.countTrain==7000:
+                Lr = Lr*0.2
+                for param_group in wf.optimizer.param_groups:
+                    param_group['lr'] = Lr
 
         # Test and finalize.
         # wf.print_delimeter(title = "Test and finalize.")
