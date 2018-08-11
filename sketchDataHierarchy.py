@@ -127,6 +127,7 @@ class SketchDatasetHierarchy(Dataset):
         sketchLines = np.zeros((0,30,2), dtype=np.float32) 
         sketchLinelenFlat = np.zeros((0), dtype=np.int)
         sketchLinelen, sketchLinenum = [], [] 
+
         for batchind in self.batch_idx[self.batch_ind,:]:
             sketchLines = np.concatenate((sketchLines,self.sketchPaddedLines[batchind]),axis=0 )
             sketchLinelenFlat = np.concatenate((sketchLinelenFlat,np.array(self.sketchLineLength[batchind])), axis=0)

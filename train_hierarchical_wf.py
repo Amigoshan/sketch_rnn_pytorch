@@ -16,13 +16,13 @@ import sys
 sys.path.append('../WorkFlow')
 from workflow import WorkFlow
 
-exp_prefix = '3_1_'
+exp_prefix = '3_5_'
 
 Lr = 0.001
-LrDecrease = [30000, 37000]
+LrDecrease = [40000, 55000]
 Batch = 32
 TestBatch = 5
-Trainstep = 10000
+Trainstep = 60000
 Showiter = 10
 Snapshot = 10000
 
@@ -37,7 +37,7 @@ LoadLineModel = True
 LineModel = 'models/2_4_sketchrnn_40000.pkl'
 
 lambda_eof = 0.1
-lambda_kl = 0.1
+lambda_kl = 0.01
 
 datapath = './data'
 filecat = 'sketchrnn_cat.npz'
@@ -73,7 +73,8 @@ class MyWF(WorkFlow.WorkFlow):
         self.AV['loss'].avgWidth =  100
         self.add_accumulated_value("loss_cons", 100)
         self.add_accumulated_value("loss_kl", 100)
-        self.add_accumulated_value("loss_eof", 100)
+        self.add_accumulated_value("loss_cons_high", 100)
+        # self.add_accumulated_value("loss_eof", 100)
         self.add_accumulated_value("test_loss")
 
         # === Create a AccumulatedValuePlotter object for ploting. ===
@@ -87,7 +88,10 @@ class MyWF(WorkFlow.WorkFlow):
                 "loss_cons", self.AV, ["loss_cons"], [True]))
 
         self.AVP.append(WorkFlow.VisdomLinePlotter(\
-                "loss_eof", self.AV, ["loss_eof"], [True]))
+                "loss_cons_high", self.AV, ["loss_cons_high"], [True]))
+
+        # self.AVP.append(WorkFlow.VisdomLinePlotter(\
+        #         "loss_eof", self.AV, ["loss_eof"], [True]))
 
     # Overload the function initialize().
     def initialize(self):
@@ -106,7 +110,7 @@ class MyWF(WorkFlow.WorkFlow):
         sketchLines, sketchLinelen, sketchLinenum, sketchLinelenFlat = self.dataset.get_random_batch(Batch)
         inputVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
 
-        outputVar, endStrokeCode, _, _, mean, logstd = self.sketchnet(inputVar.cuda(), sketchLinelenFlat, sketchLinenum)
+        outputVar, endStrokeCode, _, _, mean, logstd, sketchInput, lineCodeRecons = self.sketchnet(inputVar.cuda(), sketchLinelenFlat, sketchLinenum)
 
         # zero the parameter gradients
         self.optimizer.zero_grad()
@@ -115,22 +119,25 @@ class MyWF(WorkFlow.WorkFlow):
 
         loss_cons = self.criterion_mse(outputVar, targetVar.cuda())   
         loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).mean()/2.0
-        loss_eof = self.criterion_mse(endStrokeCode, torch.zeros_like(endStrokeCode).cuda()) 
+        loss_cons_high = self.criterion_mse(lineCodeRecons, sketchInput.detach())
+        # loss_eof = self.criterion_mse(endStrokeCode, torch.zeros_like(endStrokeCode).cuda()) 
 
-        loss =  loss_cons + loss_kl * lambda_kl + loss_eof * lambda_eof # 
+        loss =  loss_cons_high + loss_kl * lambda_kl #+ loss_eof * lambda_eof # 
         loss.backward()
 
         # torch.nn.utils.clip_grad_norm(sketchnet.parameters(), ClipNorm)
-        for param in self.sketchnet.parameters():
+        for param in self.sketchnet.get_high_params():
             param.grad.clamp_(-ClipNorm, ClipNorm) 
 
+        # import ipdb; ipdb.set_trace()
         self.optimizer.step()
 
 
         self.AV["loss"].push_back(loss.item())
         self.AV["loss_cons"].push_back(loss_cons.item())
         self.AV["loss_kl"].push_back(loss_kl.item())
-        self.AV["loss_eof"].push_back(loss_eof.item())
+        self.AV["loss_cons_high"].push_back(loss_cons_high.item())
+        # self.AV["loss_eof"].push_back(loss_eof.item())
 
         if ( self.countTrain % Snapshot == 0 ):
             self.write_accumulated_values()
@@ -147,15 +154,16 @@ class MyWF(WorkFlow.WorkFlow):
         sketchLines, sketchLinelen, sketchLinenum, sketchLinelenFlat = self.valset.get_random_batch(TestBatch)
         inputVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
 
-        outputVar, endStrokeCode, _, _, mean, logstd = self.sketchnet(inputVar.cuda(), sketchLinelenFlat, sketchLinenum)
+        outputVar, endStrokeCode, _, _, mean, logstd, sketchInput, lineCodeRecons = self.sketchnet(inputVar.cuda(), sketchLinelenFlat, sketchLinenum)
 
         targetVar = torch.transpose(torch.from_numpy(sketchLines), 0, 1)
 
         loss_cons = self.criterion_mse(outputVar, targetVar.cuda())   
         loss_kl = (logstd.exp()+mean.pow(2) - logstd - 1).mean()/2.0
-        loss_eof = self.criterion_mse(endStrokeCode, torch.zeros_like(endStrokeCode).cuda()) 
-
-        loss =  loss_cons + loss_kl * lambda_kl + loss_eof * lambda_eof # 
+        # loss_eof = self.criterion_mse(endStrokeCode, torch.zeros_like(endStrokeCode).cuda()) 
+        loss_cons_high = self.criterion_mse(lineCodeRecons, sketchInput.detach())
+        # loss =  loss_cons + loss_kl * lambda_kl + loss_eof * lambda_eof # 
+        loss =  loss_cons_high + loss_kl * lambda_kl
 
         self.AV["test_loss"].push_back(loss.item(), self.countTrain)
 
