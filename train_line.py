@@ -116,10 +116,10 @@ while True:
 
         inputLine = inputVar[:,k,:].cpu().numpy()
         print inputLine
-        line1 = dataset.returnPaddedLine(inputLine)
+        line1, _ = dataset.returnPaddedLine(inputLine)
         outputLine = outputVar[:,k,:].detach().cpu().numpy()
         print outputLine
-        line2 = dataset.returnPaddedLine(outputLine)
+        line2, _ = dataset.returnPaddedLine(outputLine)
 
         fig = plt.figure(1, (20, 7))
         axis = fig.subplots(1, 2)

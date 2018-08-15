@@ -87,7 +87,7 @@ class SketchRnn(nn.Module):
     def forward(self, x, line_len, sketch_len):
         (seqNum, lineBatch, inputNum) = x.size()  
         sketchBatch = len(sketch_len)
-        lineCode, LineMeanVar, LineLogstdVar = self.lineRnn.encode(x, line_len, lineBatch)
+        lineCode, lineMeanVar, lineLogstdVar = self.lineRnn.encode(x, line_len, lineBatch)
 
         # reshape and pad the lineCode
         maxlen = max(sketch_len) + 1 # pad one zero-sequence as eof
@@ -113,7 +113,7 @@ class SketchRnn(nn.Module):
         # import ipdb; ipdb.set_trace()
         outputVar = self.lineRnn.decode(lineDecodeInput, lineBatch, seqNum)
 
-        return outputVar, endStrokeCode, LineMeanVar, LineLogstdVar, meanVar, logstdVar, sketchInput, lineCodeRecons
+        return outputVar, endStrokeCode, lineMeanVar, lineLogstdVar, meanVar, logstdVar, sketchInput, lineCodeRecons
 
     def get_high_params(self):
         return self.sketchRnn.parameters()
@@ -150,7 +150,7 @@ if __name__ == '__main__':
     rnn.cuda()
     maxLineLen = 6
     inputVar = torch.randn(maxLineLen, sum(lineNum), inputNum).cuda()
-    outputVar, endStrokeCode, LineMeanVar, LineLogstdVar, meanVar, logstdVar = rnn(inputVar, lineLen, lineNum)
+    outputVar, endStrokeCode, lineMeanVar, lineLogstdVar, meanVar, logstdVar = rnn(inputVar, lineLen, lineNum)
 
 
     # # test load_line

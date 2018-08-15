@@ -236,18 +236,20 @@ class SketchDatasetHierarchy(Dataset):
             plt.plot(line_np[:,0],0-line_np[:,1])
         plt.show()
 
-    def returnPaddedLine(self, paddedLine, line_len=None):
+    def returnPaddedLine(self, paddedLine, start=[0,0], line_len=None):
         if line_len is None:
             line_len = len(paddedLine)
-        paddedLine = self.denormalize(paddedLine)
+        paddedLine_denorm = paddedLine * self.scale_factor # denormalization
         line_draw = []
-        x, y = 0, 0
+        x, y = start[0], start[1]
         for i in range(line_len):
-            x += float(paddedLine[i, 0])
-            y += float(paddedLine[i, 1])
+            x += float(paddedLine_denorm[i, 0])
+            y += float(paddedLine_denorm[i, 1])
             line_draw.append([x, y])
+            # if abs(paddedLine[i, 0]) < 0.1 and abs(paddedLine[i, 1]) < 0.1:
+            #     break
         line_np = np.array(line_draw)
-        return line_np
+        return line_np, [x, y]
         # plt.plot(line_np[:,0],0-line_np[:,1])
         # plt.show()
 
